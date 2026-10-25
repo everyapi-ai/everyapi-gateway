@@ -382,6 +382,14 @@ body.side-nav :is(#nav button[data-view], #prefs) {
   width: 100%; height: 30px; padding: 0 8px; border-radius: 7px;
   font-size: 13px; color: var(--fg-2); text-align: left; white-space: nowrap;
 }
+body.side-nav #nav .chat-link {
+  display: flex; align-items: center; justify-content: flex-start; gap: 9px;
+  width: 100%; height: 30px; padding: 0 8px; border-radius: 7px;
+  font-size: 13px; color: var(--fg-2); text-align: left; white-space: nowrap;
+  text-decoration: none;
+}
+body.side-nav #nav .chat-link:hover { background: var(--pill); color: var(--fg); }
+body.side-nav #nav .chat-link .nav-ic { display: block; flex: none; color: var(--muted); }
 body.side-nav :is(#nav button[data-view], #prefs) > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 body.side-nav :is(#nav button[data-view], #prefs):hover:not(.on) { background: var(--pill); color: var(--fg); }
 body.side-nav :is(#nav button[data-view], #prefs).on { background: var(--card); color: var(--fg); box-shadow: var(--seg-edge); font-weight: 500; }
