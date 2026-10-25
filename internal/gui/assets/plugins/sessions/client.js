@@ -233,7 +233,61 @@ magpie.plugin("sessions", (ctx) => {
     return d;
   }
 
+  function drawEveryAPIChat() {
+    page.replaceChildren();
+    page.classList.add("everyapi-chat-page");
+    const title = el("div", "everyapi-chat-title");
+    title.append(el("h2", "", "EveryAPI 对话"));
+    const model = el("select", "everyapi-chat-model");
+    model.disabled = true;
+    model.append(new Option("加载模型…", ""));
+    title.append(model);
+    const messages = el("div", "everyapi-chat-messages");
+    const empty = el("div", "everyapi-chat-empty", "选择模型后，在下方输入消息。");
+    messages.append(empty);
+    const form = el("form", "everyapi-chat-form");
+    const input = el("textarea", "everyapi-chat-input");
+    input.rows = 1; input.maxLength = 20000; input.placeholder = "输入消息…"; input.setAttribute("aria-label", "消息");
+    const send = el("button", "everyapi-chat-send", "➤");
+    send.type = "submit"; send.setAttribute("aria-label", "发送");
+    form.append(input, send);
+    page.append(title, messages, form);
+    let history = [], controller = null, assistant = null;
+    const bubble = (role, text, error = false) => {
+      empty.hidden = true;
+      const b = el("div", "everyapi-chat-msg " + (error ? "error" : role), text);
+      messages.append(b); messages.scrollTop = messages.scrollHeight; return b;
+    };
+    const errorText = async (res) => { const text = await res.text(); try { const x = JSON.parse(text); return x?.error?.message || x?.error || text || res.statusText; } catch { return text || res.statusText; } };
+    fetch("/api/chat/models", { headers: { Accept: "application/json" } }).then(async (res) => {
+      if (!res.ok) throw new Error(await errorText(res));
+      const list = (await res.json())?.data || [];
+      model.replaceChildren(...list.map((x) => new Option(x.id, x.id)));
+      if (!list.length) model.append(new Option("暂无模型", ""));
+      model.disabled = false;
+    }).catch((err) => { model.replaceChildren(new Option("模型加载失败", "")); model.disabled = false; bubble("assistant", err.message, true); });
+    form.onsubmit = async (event) => {
+      event.preventDefault(); const text = input.value.trim();
+      if (!text || !model.value || controller) return;
+      input.value = ""; history.push({ role: "user", content: text }); bubble("user", text);
+      controller = new AbortController(); input.disabled = true; model.disabled = true; send.disabled = true; assistant = null;
+      try {
+        const res = await fetch("/api/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json" }, body: JSON.stringify({ model: model.value, messages: history, stream: true }), signal: controller.signal });
+        if (!res.ok) throw new Error(await errorText(res));
+        const type = res.headers.get("content-type") || "";
+        if (type.includes("text/event-stream")) {
+          const reader = res.body.getReader(), decoder = new TextDecoder(); let buffer = "";
+          while (true) { const part = await reader.read(); if (part.done) break; buffer += decoder.decode(part.value, { stream: true }); const lines = buffer.split(/\r?\n/); buffer = lines.pop() || ""; for (const line of lines) { const value = line.startsWith("data:") ? line.slice(5).trim() : ""; if (!value || value === "[DONE]") continue; try { const d = JSON.parse(value), delta = d?.choices?.[0]?.delta?.content ?? d?.choices?.[0]?.text ?? ""; if (delta) { if (!assistant) assistant = bubble("assistant", ""); assistant.textContent += delta; messages.scrollTop = messages.scrollHeight; } } catch {} } }
+        } else { const d = await res.json(), text = d?.choices?.[0]?.message?.content ?? d?.choices?.[0]?.text ?? ""; assistant = bubble("assistant", typeof text === "string" ? text : JSON.stringify(text)); }
+        if (assistant) history.push({ role: "assistant", content: assistant.textContent }); else bubble("assistant", "（模型没有返回文本）");
+      } catch (err) { if (err.name !== "AbortError") { bubble("assistant", err.message || "请求失败", true); history.pop(); } }
+      finally { controller = null; input.disabled = false; model.disabled = false; send.disabled = false; input.focus(); }
+    };
+    input.oninput = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 180) + "px"; };
+  }
+
   function draw() {
+    if (window.bootPrefs?.everyapiOnly) { drawEveryAPIChat(); return; }
     const keepFocus = page.querySelector(".sm-agent-pick:focus, .sm-agents .opt:focus");
     fitObserver?.disconnect();
     if (page.querySelector(".sm-agent-pick.open")) closeProtoMenu();

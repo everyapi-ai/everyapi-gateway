@@ -1,4 +1,19 @@
 /* Sessions: every session of an agent, by folder, to resume or delete (sessions.js) */
+.everyapi-chat-page { min-height: 100%; height: calc(100dvh - 72px); display: flex; flex-direction: column; gap: 12px; padding: 18px max(16px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-left)); }
+.everyapi-chat-title { display: flex; align-items: center; gap: 10px; flex: none; }
+.everyapi-chat-title h2 { margin: 0; font-size: 20px; }
+.everyapi-chat-model { margin-left: auto; min-width: 180px; max-width: 360px; height: 38px; border: 1px solid var(--line); border-radius: 9px; padding: 0 9px; background: var(--card); color: var(--fg); font: inherit; }
+.everyapi-chat-messages { flex: 1; min-height: 120px; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg); }
+.everyapi-chat-empty { margin: auto; color: var(--muted); text-align: center; }
+.everyapi-chat-msg { max-width: min(82%, 720px); padding: 10px 13px; border-radius: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.everyapi-chat-msg.user { align-self: flex-end; background: var(--accent-soft); }
+.everyapi-chat-msg.assistant { align-self: flex-start; background: var(--card); border: 1px solid var(--line-2); }
+.everyapi-chat-msg.error { align-self: flex-start; color: var(--red); background: var(--red-soft); }
+.everyapi-chat-form { display: flex; align-items: flex-end; gap: 8px; flex: none; padding: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.everyapi-chat-input { flex: 1; min-width: 0; min-height: 42px; max-height: 180px; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: 16px/1.45 var(--ui-font, system-ui), sans-serif; padding: 8px 5px; }
+.everyapi-chat-send { flex: none; width: 42px; height: 42px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 18px; }
+.everyapi-chat-send:disabled { opacity: .5; }
+@media (max-width: 560px) { .everyapi-chat-page { height: calc(100dvh - 116px); padding: 12px; } .everyapi-chat-title { display: grid; grid-template-columns: 1fr; gap: 6px; } .everyapi-chat-model { margin-left: 0; width: 100%; max-width: none; } .everyapi-chat-msg { max-width: 92%; } }
 .sm-head { gap: 8px; height: auto; min-height: 34px; }
 .sm-switch { min-width: 0; flex: 1; display: flex; align-items: center; }
 .sm-agents { min-width: 0; max-width: 100%; }

@@ -14,7 +14,6 @@ func webChatRoutes(mux *http.ServeMux) {
 	if !WebEveryAPIOnly {
 		return
 	}
-	mux.HandleFunc("GET /chat", webChatPage)
 	mux.HandleFunc("GET /api/chat/models", func(w http.ResponseWriter, r *http.Request) {
 		serveWebChatGateway(w, r, "/v1/models")
 	})
