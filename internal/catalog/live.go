@@ -603,6 +603,9 @@ func fetchPage(ctx context.Context, url, key string, anthropic bool, headers map
 		}
 		input := imageInput(r.Modalities.Input)
 		apis := EndpointAPIs(r.Endpoints)
+		if len(apis) == 0 {
+			apis = EndpointAPIs(r.EndpointTypes)
+		}
 		if native := EndpointAPIs(r.Native); len(native) > 0 {
 			apis = native
 		}
@@ -673,6 +676,8 @@ type liveModel struct {
 	// Code's Claude models on /messages alone, its open ones on
 	// /chat/completions and /responses
 	Endpoints []string `json:"supported_endpoints"`
+	// EveryAPI names the API dialects instead of their paths.
+	EndpointTypes []string `json:"supported_endpoint_types"`
 	// the context window, where the list tells it (OpenRouter, Command
 	// Code); any, as a vendor's odd value mustn't lose the whole list
 	ContextLength any `json:"context_length"`
@@ -747,12 +752,14 @@ func EndpointAPIs(endpoints []string) []string {
 	for _, e := range endpoints {
 		var api string
 		switch strings.TrimPrefix(strings.TrimSuffix(e, "/"), "/v1") {
-		case "/chat/completions":
+		case "/chat/completions", "openai":
 			api = "chat"
-		case "/responses":
+		case "/responses", "openai-response":
 			api = "responses"
-		case "/messages":
+		case "/messages", "anthropic":
 			api = "anthropic"
+		case "gemini":
+			api = "gemini"
 		}
 		if api != "" && !slices.Contains(out, api) {
 			out = append(out, api)

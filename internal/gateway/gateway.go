@@ -3791,8 +3791,7 @@ func (s *Server) attempt(w http.ResponseWriter, r *http.Request, from provider.P
 	}
 	// a backend that only streams gets a non-streaming request translated
 	// (the provider is always streamed on that path) rather than relayed,
-	// except a plugin's on Responses, which is relayed streamed and given
-	// back whole (gathers)
+	// except when gathers can preserve the complete native Responses reply from the upstream stream.
 	relayable := slices.Contains(s.usable(p, model), from) && (p.Account == nil || !p.Account.Stream || streamOf(body) || gathers(p, from, body))
 	relay := relayable
 	// a Claude model is asked on Messages whatever API the client spoke,
@@ -4431,7 +4430,10 @@ func (s *Server) passthrough(w http.ResponseWriter, r *http.Request, p provider.
 			body = withThinkingOnToolTurns(body)
 		}
 		if !anthropicModel.MatchString(model) && !provider.Reasonless(p.ID, model) {
-			body = thinkingOffUnlessAsked(body)
+			// EveryAPI relays several vendors; Kimi rejects a thinking parameter the client never sent.
+			if p.Preset != "everyapi" {
+				body = thinkingOffUnlessAsked(body)
+			}
 			// Claude Code's auto mode classifier, on a vendor's model that
 			// may think whatever it is told (#250); a Claude model's request
 			// goes as it was sent, safeguards and all

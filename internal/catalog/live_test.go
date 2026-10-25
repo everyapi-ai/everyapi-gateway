@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,23 @@ func TestFetchContextLength(t *testing.T) {
 	}
 	if len(got) != 3 || got["claude-sonnet-5"] != 1000000 || got["kimi-k3"] != 0 || got["glm-5"] != 0 {
 		t.Errorf("contexts %v", got)
+	}
+}
+
+func TestFetchEveryAPIEndpointTypes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"data":[{"id":"smart-everyapi","supported_endpoint_types":["openai"]},{"id":"gpt-6-luna","supported_endpoint_types":["openai-response"],"chat_completions_bridge":true},{"id":"kimi-k2.7-code","supported_endpoint_types":["openai","anthropic"]},{"id":"explicit","supported_endpoints":["/responses"],"supported_endpoint_types":["openai"]}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	ms, _, err := FetchAt(context.Background(), srv.URL+"/v1", "test", false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"smart-everyapi": "chat", "gpt-6-luna": "responses", "kimi-k2.7-code": "chat,anthropic", "explicit": "responses"}
+	for _, m := range ms {
+		if got := strings.Join(m.APIs, ","); got != want[m.ID] {
+			t.Errorf("%s APIs=%q, want %q", m.ID, got, want[m.ID])
+		}
 	}
 }
 

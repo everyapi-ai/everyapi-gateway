@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in acceptance against an upstream; never part of the offline test suite."""
 import argparse
+import concurrent.futures
 import http.cookiejar
 import json
 import os
@@ -26,6 +27,10 @@ def main():
     parser.add_argument("--binary", default="dist/everyapi-web")
     parser.add_argument("--key-file", required=True, type=Path)
     parser.add_argument("--model", required=True, help="Exact upstream model ID; no automatic model selection")
+    parser.add_argument("--additional-model", action="append", default=[], help="Additional model checked on every selected protocol")
+    parser.add_argument("--chat-only-model", action="append", default=[], help="Additional model checked on Chat only")
+    parser.add_argument("--workers", type=int, choices=range(1, 5), default=1)
+    parser.add_argument("--report-file", type=Path, help="Write sanitized per-model results, without credentials or response bodies")
     parser.add_argument("--region", choices=["global", "cn"], default="global")
     parser.add_argument("--api-base", help="Official EveryAPI origin or a loopback fixture origin")
     parser.add_argument("--protocols", nargs="+", choices=["chat", "chat-stream", "responses", "anthropic", "gemini"],
@@ -44,6 +49,9 @@ def main():
     if not key or len(key) > 4096:
         parser.error("key file must contain one nonempty upstream key (maximum 4096 characters)")
     binary = str(Path(args.binary).resolve())
+    full_models = list(dict.fromkeys([args.model, *args.additional_model]))
+    all_models = list(dict.fromkeys([*full_models, *args.chat_only_model]))
+    results = []
     child = None
     jar = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(jar))
@@ -53,7 +61,7 @@ def main():
     base = f"http://127.0.0.1:{port}"
 
     def request(path, credential=None, body=None, form=False, status=200, auth_header="Authorization"):
-        headers = {"Accept": "text/html" if path == "/" else "application/json"}
+        headers = {"Accept": "text/html" if path == "/" else "application/json", "User-Agent": "EveryAPI-Web-Acceptance/0.1"}
         if credential:
             headers[auth_header] = "Bearer " + credential if auth_header == "Authorization" else credential
         if auth_header == "x-api-key":
@@ -70,7 +78,13 @@ def main():
         with response:
             raw = response.read(4 * 1024 * 1024 + 1).decode()
             # Never print raw replies, request bodies, cookies, logs or credentials.
-            assert response.status == status, f"{path}: HTTP {response.status}, expected {status}"
+            if response.status != status:
+                try:
+                    error = json.loads(raw).get("error", {})
+                    detail = error.get("message", "") if isinstance(error, dict) else ""
+                except ValueError:
+                    detail = "non-JSON error response"
+                raise AssertionError(f"{path}: HTTP {response.status}, expected {status}: {str(detail).replace(key, '[redacted]')[:220]}")
             assert len(raw) <= 4 * 1024 * 1024, f"{path}: reply exceeded acceptance size limit"
             if path != "/api/provider/key":
                 assert key not in raw, f"{path}: upstream credential appeared in response"
@@ -96,8 +110,8 @@ def main():
             except subprocess.TimeoutExpired:
                 pass
             finally:
-                # Also stop inherited discovery helpers after their parent exits.
-                send(signal.SIGKILL if os.name != "nt" else signal.SIGTERM)
+                if child.poll() is None:
+                    send(signal.SIGKILL if os.name != "nt" else signal.SIGTERM)
                 child.wait(timeout=5)
         child = None
 
@@ -136,16 +150,18 @@ def main():
                 # Exercise the management Web API, starting without a bootstrap upstream key.
                 config = {"id": "everyapi", "preset": "everyapi", "name": "EveryAPI acceptance",
                           "key": key, "chat": root + "/v1", "responses": root + "/v1",
-                          "anthropic": root, "gemini": root + "/v1beta", "models": [args.model]}
+                          "anthropic": root, "gemini": root + "/v1beta", "models": all_models}
                 json_request("/api/provider/save", body=config)
                 models = json_request("/api/provider/models", body={"id": "everyapi"})
-                assert any(m["id"] == args.model for m in models["provider"]["models"]), "requested model was absent from upstream discovery"
+                discovered = {m["id"] for m in models["provider"]["models"]}
+                assert set(all_models) <= discovered, "requested model was absent from upstream discovery"
                 model = "everyapi/" + args.model
                 listing = json_request("/v1/models", credential=client)
-                assert any(m["id"] == model for m in listing["data"]), "selected model was absent from client API"
+                assert {"everyapi/" + m for m in all_models} <= {m["id"] for m in listing["data"]}, "selected model was absent from client API"
                 print("PASS: sign-in, healthcheck, Web key configuration, upstream model discovery and credential separation", flush=True)
                 prompt = "Reply with the word OK."
-                for protocol in dict.fromkeys(args.protocols):
+                def probe(model_id, protocol):
+                    model = "everyapi/" + model_id
                     chat = {"model": model, "max_tokens": 128, "messages": [{"role": "user", "content": prompt}]}
                     if protocol == "chat":
                         reply = json_request("/v1/chat/completions", credential=client, body=chat)
@@ -168,7 +184,25 @@ def main():
                         reply = json_request("/v1beta/models/" + urllib.parse.quote(model, safe="/") + ":generateContent", credential=client, auth_header="x-goog-api-key",
                                              body={"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": {"maxOutputTokens": 128}})
                         assert any(p.get("text") for c in reply.get("candidates", []) for p in c.get("content", {}).get("parts", [])), "Gemini returned no text"
-                    print(f"PASS: {protocol} ({'live EveryAPI' if live else 'local fixture'})", flush=True)
+                jobs = [(m, p) for m in full_models for p in dict.fromkeys(args.protocols)]
+                jobs += [(m, "chat") for m in all_models if m not in full_models]
+                with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+                    pending = {pool.submit(probe, m, p): (m, p, time.monotonic()) for m, p in jobs}
+                    for future in concurrent.futures.as_completed(pending):
+                        m, p, started = pending[future]
+                        result = {"region": args.region, "model": m, "protocol": p}
+                        try:
+                            future.result()
+                            result["status"] = "pass"
+                        except (AssertionError, OSError, ValueError, KeyError, IndexError) as err:
+                            # Error assertions contain paths/statuses, never raw upstream bodies.
+                            detail = str(err).replace(key, "[redacted]").replace(client, "[redacted]").replace(admin, "[redacted]")
+                            result.update(status="fail", error=detail[:300])
+                        result["elapsed_seconds"] = round(time.monotonic() - started, 2)
+                        results.append(result)
+                        print(f"{result['status'].upper()}: {args.region} {m} {p}" + (": " + result["error"] if "error" in result else ""), flush=True)
+                        if args.report_file:
+                            args.report_file.write_text(json.dumps({"upstream": root, "results": results}, indent=2) + "\n")
                 keys = json_request("/api/caller-keys")["keys"]
                 key_id = keys[0]["id"]
                 rotated = json_request("/api/caller-keys/rotate-key", body={"key": key_id})["secret"]
@@ -200,6 +234,10 @@ def main():
                 print("PASS: credential-safe process logs; temporary data and process will be removed", flush=True)
             finally:
                 stop()
+    failed = sum(r["status"] == "fail" for r in results)
+    print(f"RESULT: {len(results) - failed}/{len(results)} passed; {failed} failed", flush=True)
+    if failed:
+        raise SystemExit(1)
 
 
 def interrupted(*_):

@@ -24,6 +24,8 @@ backfilled; see [Gateway Session Aggregation](gateway-sessions.md).
 
 ## Responsibilities and sources of truth
 
+The EveryAPI preset requests upstream Responses as SSE and gathers the completed response for clients requesting JSON, preserving native output, tools and usage (`gathers`). An EveryAPI error marked `error.everyapi_code=retry_exhausted` describes the last failed upstream channel; it rests only the requested model, since other models on the same EveryAPI key may remain available (`everyAPIChannelFailure`). Account quota errors without that marker retain the normal key-level rest. `TestEveryAPIResponsesStreamOnlyUpstream` and `TestEveryAPIChannelQuotaDoesNotRestOtherModels` cover these boundaries.
+
 | Part | Responsibility | Source |
 | --- | --- | --- |
 | Address and caller | `DefaultAddr`. The local token `magpie` and the per-agent `magpie-<agent>` (`TokenFor`). `agentOf` tells which agent asked, first by token, then by User-Agent. Claude Science, whose User-Agent is the Anthropic SDK's, is told by its client's `X-Anthropic-Surface: operon` (`isClaudeScience`). It is listed every model as `claude-magpie-<number>` (`scienceModels`; its picker keeps only a `claude-` id whose name isn't a lower-case slug), and a Claude id magpie doesn't serve (its default before a pick, its haiku side tasks) goes to the model its last turn with tools was on, else the first it is listed (`scienceTurn`, kept in `claude-science.model`). | [`gateway.go`](../../internal/gateway/gateway.go) |

@@ -20,7 +20,8 @@ import (
 // and no report asks for more. Messages isn't gathered, as its stream has
 // no event that holds the whole reply.
 func gathers(p provider.Provider, proto provider.Protocol, body []byte) bool {
-	return proto == provider.Responses && p.IsPlugin() && p.Account.Stream && !streamOf(body)
+	// EveryAPI's GPT backends require stream=true even when the client wants one JSON response; gathering preserves native tools and usage fields.
+	return proto == provider.Responses && !streamOf(body) && (p.Preset == "everyapi" || p.IsPlugin() && p.Account.Stream)
 }
 
 // gathered holds a relayed Responses stream that the client asked for

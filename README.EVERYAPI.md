@@ -135,6 +135,8 @@ timeout 420 python3 scripts/everyapi-web-live.py \
   --model '<exact upstream text-model ID>'
 ```
 
+For a broader matrix, repeat `--additional-model <id>` for models checked on every selected protocol and `--chat-only-model <id>` for models checked only on Chat. `--workers 1` (the default) through `--workers 4` controls concurrency; `--report-file <path.json>` records sanitized per-model results. Each selected model/protocol sends a real request. The runner continues after individual generation failures, verifies persistence and revocation, then exits nonzero if any probe failed. It never silently retries failed probes or counts them as passes.
+
 This uses the built native binary and a disposable data directory. It signs in, saves the upstream key through the management Web API, fetches actual upstream models, then sends five short generation requests: Chat JSON, Chat SSE, Responses, Anthropic and Gemini. The selected model must support the protocols being checked; `--protocols chat chat-stream` narrows the run explicitly, and `--region cn` selects China. There is no automatic model choice or retry. Each request asks for at most 128 output tokens; upstream pricing and model behavior determine actual charges. The script then checks client-key rotation, persistence of the saved provider/key/models, revocation across restarts and credential-safe process logs. Raw responses, keys and process logs are withheld; its child process and disposable data are removed on exit. This exercises the Web API; the separate Playwright smoke checks actual browser interaction.
 
 When running from an unpacked binary archive, add `--binary ./everyapi-web` to the acceptance command. Docker Compose builds require the source checkout, not just the binary archive.

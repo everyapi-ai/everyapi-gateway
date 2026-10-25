@@ -1136,7 +1136,7 @@ func (s *Server) restAfterMarked(c candidate, status int, header http.Header, bo
 	if (why == failCredit || why == failQuota) && c.p.PaidBesideFree(c.model) {
 		id = c.restID()
 	}
-	if remoteModelRest(c, why, header) {
+	if remoteModelRest(c, why, header) || c.p.Preset == "everyapi" && (header.Get(everyAPIChannelHeader) != "" || everyAPIChannelFailure(body)) {
 		id = c.restID()
 	}
 	r.Key = id
@@ -1163,6 +1163,16 @@ func (s *Server) restAfterMarked(c candidate, status int, header http.Header, bo
 		go narrowWhenRead(c, r)
 	}
 	return r
+}
+
+// EveryAPI's retry_exhausted is the last upstream channel's failure, not the relay key's own quota. Other models on that key may still work.
+func everyAPIChannelFailure(body []byte) bool {
+	var reply struct {
+		Error struct {
+			Code string `json:"everyapi_code"`
+		} `json:"error"`
+	}
+	return json.Unmarshal(body, &reply) == nil && reply.Error.Code == "retry_exhausted"
 }
 
 // remoteModelRest says a refusal for want of quota, credit or rate rests
@@ -1342,6 +1352,10 @@ func (c candidate) allowance() (provider.Allowance, bool) {
 // agent given the error reads it too. When it said so in the error itself
 // (ChatGPT's resets_at), that goes on as Retry-After.
 func keepRetry(dst, src http.Header, body []byte) {
+	// Protocol conversion may discard everyapi_code; carry its channel scope privately to restAfter.
+	if everyAPIChannelFailure(body) {
+		dst.Set(everyAPIChannelHeader, "1")
+	}
 	for k, vs := range src {
 		l := strings.ToLower(k)
 		if l == "retry-after" || strings.Contains(l, "ratelimit") && strings.Contains(l, "reset") {
@@ -1373,6 +1387,8 @@ func keepRetry(dst, src http.Header, body []byte) {
 // refusedHeader carries, from keepRetry to settle, that an error status
 // was the safety filter refusing the request, and what it said.
 const refusedHeader = "X-Magpie-Refused"
+
+const everyAPIChannelHeader = "X-Magpie-EveryAPI-Channel-Failure"
 
 // resetsHeader carries, from keepRetry to restAfter, when a subscription
 // out of quota said it's back. A held error that is passed on after all
