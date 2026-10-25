@@ -16,7 +16,7 @@ func TestWebChatPageIsMobileEveryAPIEntry(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("chat page status: %d", w.Code)
 	}
-	for _, want := range []string{"和 EveryAPI 聊聊", "/api/chat/models", "/api/chat/completions", "/settings", "/pwa/app.js", "viewport-fit=cover"} {
+	for _, want := range []string{"和 EveryAPI 聊聊", "/api/chat/models", "/api/chat/completions", "/settings?view=sessions", "class=\"composer-model\"", "/pwa/app.js", "viewport-fit=cover"} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("chat page missing %q", want)
 		}

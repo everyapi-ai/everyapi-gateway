@@ -349,9 +349,10 @@ func webServed(port, key string, keep time.Duration, page http.Handler) http.Han
 // behind the key, compressed for the browser.
 func webHandler(port, key string, keep time.Duration, page http.Handler) http.Handler {
 	guard := webGuard("magpie_web_"+port, key, keep, page)
+	protected := webGitHubRoutes("magpie_web_"+port, key, keep, guard)
 	return webCompressed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !webPWA(w, r) {
-			guard.ServeHTTP(w, r)
+			protected.ServeHTTP(w, r)
 		}
 	}))
 }
