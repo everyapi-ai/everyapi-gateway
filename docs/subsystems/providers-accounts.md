@@ -136,6 +136,8 @@ A signed-in account's model list exists only at its vendor (the ChatGPT backend'
 
 ## Runtime path
 
+The `everyapi` keyed relay preset declares global and China endpoints for native Chat, Responses and Anthropic requests. Model IDs are discovered from the upstream service, with no fixed model list or unrelated catalog identity. The standalone [EveryAPI Web Gateway](../../README.EVERYAPI.md) bootstrap additionally supplies the native Gemini endpoint and can use a self-hosted origin. Its first provider store is seeded when an upstream key is supplied. Without a key it starts with no provider so the administrator can add EveryAPI in the Web UI; a remote provider cannot be saved with a blank key. An existing store, including an empty one after deliberate provider removal, remains authoritative. `TestEveryAPIPreset`, `TestPrepareWithoutUpstreamKey` and `TestPreparePreservesEditsAndRevocation` cover those contracts.
+
 1. **Add.** The Providers page adds a key provider through `Add` or `Save`, or an account through `StartSignIn`. An agent signed in on its own is found by `Accounts` with no step from the user.
 2. **Resolve.** The gateway calls `provider.Resolve` or `GroupFor` with the model name, then plans candidates over the provider's keys or accounts.
 3. **Sign.** For each try, `Sign` gives the request its auth. A token about to expire is refreshed first, and the rotated tokens go back to their one holder: the agent's store, or `logins.json` for an account standing behind it.

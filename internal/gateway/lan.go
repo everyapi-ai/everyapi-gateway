@@ -25,6 +25,9 @@ import (
 // network, remotely. Loopback clients may still use any token, including a
 // stale named key.
 
+// RequireClientKey makes a server distribution require issued keys on ClientPath routes even on loopback; set it before serving requests.
+var RequireClientKey bool
+
 // listenAddr is where the gateway listens: every interface while it is
 // shared, on its port, else its address. A host MAGPIE_ADDR names itself
 // (127.0.0.1 behind Tailscale Serve, one interface's address) is kept
@@ -274,7 +277,7 @@ func lanGuard(next http.Handler) http.Handler {
 			http.Error(w, "magpie isn't shared on the local network", http.StatusForbidden)
 			return
 		}
-		if remote || managedKey(r) {
+		if remote || managedKey(r) || RequireClientKey && ClientPath(r.URL.Path) {
 			var ok bool
 			r, ok = identifyCaller(w, r)
 			if !ok {
@@ -424,7 +427,7 @@ func identifyCaller(w http.ResponseWriter, r *http.Request) (*http.Request, bool
 			break
 		}
 	}
-	if !ok && !local(r) {
+	if !ok && (!local(r) || RequireClientKey && ClientPath(r.URL.Path)) {
 		if over, retry := tooManyAuthFails(); over {
 			// A flood of wrong keys: stop answering each one (no 401 oracle,
 			// no unbounded work) until the bucket refills. A valid key never

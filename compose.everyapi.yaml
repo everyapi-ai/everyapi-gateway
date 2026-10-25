@@ -1,0 +1,32 @@
+name: everyapi-web
+services:
+  gateway:
+    image: everyapi-web:local
+    build:
+      context: .
+      dockerfile: Dockerfile.everyapi
+      args:
+        VERSION: everyapi-web-0.1.0
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${EVERYAPI_BIND_IP:-127.0.0.1}:${EVERYAPI_PORT:-8080}:8080"
+    environment:
+      EVERYAPI_REGION: ${EVERYAPI_REGION:-global}
+      EVERYAPI_API_BASE: ${EVERYAPI_API_BASE:-}
+      EVERYAPI_PUBLIC_URL: ${EVERYAPI_PUBLIC_URL:-http://localhost:${EVERYAPI_PORT:-8080}}
+      EVERYAPI_API_KEY: ${EVERYAPI_API_KEY:-}
+      EVERYAPI_WEB_KEY: ${EVERYAPI_WEB_KEY:-}
+      EVERYAPI_GATEWAY_KEY: ${EVERYAPI_GATEWAY_KEY:-}
+    volumes:
+      - gateway-data:/var/lib/everyapi-web
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+volumes:
+  gateway-data:

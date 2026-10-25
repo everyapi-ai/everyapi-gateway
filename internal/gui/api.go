@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io/fs"
 	"maps"
 	"mime"
@@ -138,6 +139,9 @@ var cliBehindVal string
 
 // Version is the build's version string, shown in Settings.
 var Version = "dev"
+
+// WebName optionally names a server distribution's browser UI; set it before serving requests.
+var WebName string
 
 //go:embed assets
 var assets embed.FS
@@ -798,6 +802,11 @@ var pageFile = regexp.MustCompile(`(src|href)="([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-
 // named with its content's hash; one not among the page's files (boot.js,
 // which the API writes) keeps its name.
 func versionedPage(page []byte) []byte {
+	if WebName != "" && webPage.Load() {
+		name := []byte(html.EscapeString(WebName))
+		page = bytes.Replace(page, []byte("<title>magpie</title>"), append(append([]byte("<title>"), name...), []byte("</title>")...), 1)
+		page = bytes.Replace(page, []byte("<span>magpie</span>"), append(append([]byte("<span>"), name...), []byte("</span>")...), 1)
+	}
 	return pageFile.ReplaceAllFunc(page, func(m []byte) []byte {
 		g := pageFile.FindSubmatch(m)
 		b, err := fs.ReadFile(staticFS(), string(g[2]))
@@ -850,7 +859,11 @@ func Handler(w Windows, gw *gateway.Server) http.Handler {
 		// in (#1519's read waits for the agents); only this process's own,
 		// for one served by another magpie is the providers' read to find
 		if served.Load() != nil {
-			boot["sideGateway"] = map[string]any{"url": gateway.URL(), "running": true, "boot": true}
+			u := gateway.URL()
+			if WebName != "" && gateway.PublicURL() != "" {
+				u = gateway.PublicURL()
+			}
+			boot["sideGateway"] = map[string]any{"url": u, "running": true, "boot": true}
 		}
 		// and the settings of those the page draws (kernel.js)
 		boot["pluginConfig"] = builtinConfig(list)

@@ -432,9 +432,11 @@ type gatewayJSON struct {
 	// image), so every caller is shown a gateway key, and LAN is true too:
 	// callers from elsewhere, a container's host among them, need one
 	OnNetwork bool `json:"onNetwork,omitempty"`
-	Running   bool `json:"running"`
-	Mine      bool `json:"mine"`   // this process serves it
-	Window    bool `json:"window"` // the magpie serving it shows its routing
+	// Server distributions require issued keys even for a loopback listener.
+	RequireClientKey bool `json:"requireClientKey,omitempty"`
+	Running          bool `json:"running"`
+	Mine             bool `json:"mine"`   // this process serves it
+	Window           bool `json:"window"` // the magpie serving it shows its routing
 	// Version is another magpie's, serving it, and Older says it is older
 	// than this one: agents' requests are then sent as that version sends
 	// them, without this one's fixes (#506)
@@ -908,12 +910,15 @@ func providersState() providersJSON {
 		s.Presets = append(s.Presets, presetJSON{PresetDef: pr, Added: have[pr.ID], ZhipuTeam: team, AccessKey: vendor != "", AccessKeyVendor: vendor, AccessKeyRegions: keyRegions, Vertex: pr.ID == provider.VertexPreset, OwnClient: presetOwnClient(pr)})
 	}
 	cat := provider.Catalog()
-	s.Gateway = gatewayJSON{URL: gateway.URL(), OnNetwork: gateway.OnNetwork(), Models: len(cat), Calls: []gateway.Call{}, Groups: []gwGroupJSON{}}
-	s.Gateway.LAN = settings.Load().LAN || s.Gateway.OnNetwork
+	s.Gateway = gatewayJSON{URL: gateway.URL(), OnNetwork: gateway.OnNetwork(), RequireClientKey: gateway.RequireClientKey, Models: len(cat), Calls: []gateway.Call{}, Groups: []gwGroupJSON{}}
+	s.Gateway.LAN = settings.Load().LAN || s.Gateway.OnNetwork || s.Gateway.RequireClientKey
 	if s.Gateway.LAN {
 		s.Gateway.LANURLs = gateway.LANURLs()
 		if u := gateway.PublicURL(); slices.Contains(s.Gateway.LANURLs, u) {
 			s.Gateway.PublicURL = u
+			if WebName != "" {
+				s.Gateway.URL = u
+			}
 		}
 	}
 	for _, e := range cat {

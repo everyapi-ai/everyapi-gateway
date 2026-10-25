@@ -115,6 +115,13 @@ var alibabaPlanModels = []string{"auto", "qwen3.8-max", "qwen3.8-flash", "qwen3.
 
 // presets are ordered as they appear in the picker.
 var presets = []PresetDef{
+	{ID: "everyapi", Name: "EveryAPI", Icon: "generic", Kind: KindRelay,
+		Chat: "https://api.everyapi.ai/v1", Responses: "https://api.everyapi.ai/v1", Anthropic: "https://api.everyapi.ai",
+		Website: "https://docs.everyapi.ai", KeyHint: "sk-everyapi-…",
+		Regions: []Region{
+			{ID: "global", Name: "Global", Chat: "https://api.everyapi.ai/v1", Responses: "https://api.everyapi.ai/v1", Anthropic: "https://api.everyapi.ai"},
+			{ID: "cn", Name: "China", Chat: "https://api-cn.everyapi.ai/v1", Responses: "https://api-cn.everyapi.ai/v1", Anthropic: "https://api-cn.everyapi.ai"},
+		}},
 	{ID: "anthropic", Name: "Anthropic", Icon: "claude-color", Kind: KindVendor, Catalog: "anthropic",
 		Anthropic: "https://api.anthropic.com",
 		Website:   "https://console.anthropic.com", KeysURL: "https://console.anthropic.com/settings/keys",

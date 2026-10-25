@@ -1,0 +1,18 @@
+FROM golang:1.26.8-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=everyapi-dev
+RUN CGO_ENABLED=0 go build -tags nogui -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/everyapi-web ./cmd/everyapi-web
+
+FROM debian:12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* && groupadd -g 65532 gateway && useradd -u 65532 -g gateway -d /var/lib/everyapi-web/home gateway && mkdir -p /var/lib/everyapi-web && chown gateway:gateway /var/lib/everyapi-web
+COPY --from=build /out/everyapi-web /usr/local/bin/everyapi-web
+COPY LICENSE /usr/share/licenses/everyapi-web/LICENSE
+USER 65532:65532
+ENV EVERYAPI_DATA_DIR=/var/lib/everyapi-web EVERYAPI_WEB_ADDR=0.0.0.0:8080
+VOLUME /var/lib/everyapi-web
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["/usr/local/bin/everyapi-web", "--healthcheck"]
+ENTRYPOINT ["/usr/local/bin/everyapi-web"]

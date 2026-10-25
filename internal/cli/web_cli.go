@@ -87,6 +87,13 @@ func webCmd(args []string) error {
 
 // printWeb prints where a started page is, and what its link carries.
 func printWeb(w *gui.Web) {
+	if gui.WebName != "" {
+		u, _ := url.Parse(w.Link)
+		u.RawQuery = ""
+		fmt.Println(gui.WebName+" on", u.String())
+		fmt.Println("Sign in with EVERYAPI_WEB_KEY or the admin-key file in the data directory; gateway clients use their own keys.")
+		return
+	}
 	fmt.Println(green.Render("●"), "magpie web on", bold.Render(w.Link))
 	if l := tlsLine(); l != "" {
 		fmt.Println(l)

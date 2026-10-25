@@ -5,5 +5,9 @@ dist
 site
 build
 magpie.app
+.env
+.env.*
+!.env.everyapi.example
+.everyapi-data
 /*.md
 .DS_Store

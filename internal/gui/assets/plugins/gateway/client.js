@@ -382,7 +382,7 @@ function renderConnect() {
   // no SDK speaks System One, so it has no shell variables to set
   const langs = f.baseEnv ? langs4() : langs4().filter(([id]) => id !== "shell");
   const snipLang = langs.some(([id]) => id === lang) ? lang : "curl";
-  const urls = [g.url, ...(g.lanURLs || [])];
+  const urls = [...new Set([g.url, ...(g.lanURLs || [])])];
   // the address picked is kept (coeo91): an address not offered right now
   // (the network not up yet after a start) shows this computer's, and the
   // pick comes back with it. With none picked, MAGPIE_PUBLIC_URL is where
@@ -391,7 +391,7 @@ function renderConnect() {
   connectURL = urls.includes(connectWant) ? connectWant : first;
   // a gateway MAGPIE_ADDR puts on the network (a Docker image's, whose
   // host is another machine to it) is shown with a gateway key everywhere
-  const remote = connectURL !== g.url || !!g.onNetwork;
+  const remote = connectURL !== g.url || !!g.onNetwork || !!g.requireClientKey;
   const keys = g.lan ? (gatewayKeys || []).filter((k) => !k.off) : [];
   if (!keys.some((k) => k.id === connectKeyID)) {
     connectKeyID = "";

@@ -1,3 +1,5 @@
+> **EveryAPI Web Gateway distribution:** see [deployment, research and configuration](README.EVERYAPI.md). Build `./cmd/everyapi-web` or use `compose.everyapi.yaml` for the isolated EveryAPI server. The original Magpie documentation follows.
+
 <div align="center">
 
 <a href="https://usemagpie.ai"><img src="site/public/img/icon-256.png" width="112" alt="magpie"></a>

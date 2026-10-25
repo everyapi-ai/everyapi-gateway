@@ -7,6 +7,28 @@ const { fixture, confirmKeyAction } = require("./fixtures/caller-keys.cjs");
 const { openPart } = require("./reader.cjs");
 
 for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium", "webkit"])) {
+  for (const locale of ["en", "zh", "zh-TW", "ja", "de"]) {
+    test(`${engine} ${locale}: a strict loopback gateway only offers issued keys`, async (t) => {
+      const browser = await (engine === "webkit" ? webkit.launch() : chromium.launch({ channel: "chromium" }));
+      t.after(() => browser.close());
+      const page = await browser.newPage({ viewport: { width: 420, height: 800 }, reducedMotion: "reduce" });
+      page.setDefaultTimeout(6000);
+      await page.route("**/*", fixture(locale, "light", [], { lan: true, lanURLs: ["http://127.0.0.1:3999"], requireClientKey: true }));
+      await page.goto("http://magpie.test/?view=gateway");
+      await page.waitForFunction(() => document.querySelector("#connect .snip")?.textContent.includes("fixture-laptop"));
+      assert.equal(await page.locator("#connectAddress").count(), 0, "the same public and listener URL must not produce duplicate address choices");
+      assert(!(await page.locator("#connect .snip").textContent()).includes("OPENAI_API_KEY=magpie"));
+      await page.locator("#connectKey").click();
+      assert.equal(await page.locator(".proto-menu .pm-item").count(), 3, "only the three issued keys can be selected");
+      await page.keyboard.press("Escape");
+      // A revoked last key must leave no arbitrary-token example to copy.
+      await page.unroute("**/*");
+      await page.route("**/*", fixture(locale, "light", [], { lan: true, lanURLs: [], requireClientKey: true, keys: [] }));
+      await page.reload();
+      await page.locator("#connect").waitFor();
+      assert.equal(await page.locator("#connect .snip-wrap .copy").count(), 0);
+    });
+  }
   for (const locale of ["en", "zh"]) {
     test(`${engine} ${locale}: Connect uses the selected network address and caller key`, async (t) => {
       const browser = await (engine === "webkit" ? webkit.launch() : chromium.launch({ channel: "chromium" }));
