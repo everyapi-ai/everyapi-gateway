@@ -807,6 +807,13 @@ func versionedPage(page []byte) []byte {
 		page = bytes.Replace(page, []byte("<title>magpie</title>"), append(append([]byte("<title>"), name...), []byte("</title>")...), 1)
 		page = bytes.Replace(page, []byte("<span>magpie</span>"), append(append([]byte("<span>"), name...), []byte("</span>")...), 1)
 		page = bytes.Replace(page, []byte("</head>"), []byte(webPWAHead+`<link rel="stylesheet" href="pwa/app.css"><script src="pwa/app.js" defer></script></head>`), 1)
+		if WebEveryAPIOnly {
+			page = bytes.Replace(page, []byte(`<script src="app.js"></script>`), []byte(`<script src="everyapi.js"></script><script src="app.js"></script>`), 1)
+			page = bytes.Replace(page, []byte(`<span data-t>Providers</span>`), []byte(`<span>EveryAPI</span>`), 1)
+			for _, file := range []string{"plugins.js", "pluginpages.js"} {
+				page = bytes.Replace(page, []byte(`<script src="`+file+`"></script>`), nil, 1)
+			}
+		}
 	}
 	return pageFile.ReplaceAllFunc(page, func(m []byte) []byte {
 		g := pageFile.FindSubmatch(m)
@@ -839,7 +846,7 @@ func Handler(w Windows, gw *gateway.Server) http.Handler {
 		s := settings.Load()
 		// and the text size, which the Mac's header measures against the
 		// traffic lights
-		boot := map[string]any{"lang": s.Lang, "theme": s.Theme, "textSize": s.TextSize, "web": isWeb(w)}
+		boot := map[string]any{"lang": s.Lang, "theme": s.Theme, "textSize": s.TextSize, "web": isWeb(w), "everyapiOnly": WebEveryAPIOnly, "everyapiBase": WebEveryAPIBase}
 		if s.Colorblind {
 			boot["colorblind"] = true
 		}
@@ -2352,7 +2359,8 @@ func Handler(w Windows, gw *gateway.Server) http.Handler {
 	})
 	agentModelsAPI(mux)
 	devListen(mux)
-	return noFramedAPI(held(mux))
+	everyAPIRoutes(mux)
+	return noFramedAPI(everyAPIOnly(held(mux)))
 }
 
 // noFramedAPI turns away a request for /api that no page of the window's

@@ -896,14 +896,23 @@ func providersState() providersJSON {
 	have := map[string]bool{}
 	for _, p := range provider.All() {
 		// a preset is added once any provider is its, whatever its id
+		if WebEveryAPIOnly && p.ID != "everyapi" {
+			continue
+		}
 		have[p.ID], have[p.Preset] = true, true
 		s.Providers = append(s.Providers, providerInfoWith(p, uses, desktop))
 	}
 	// partners first, as the add sheet lists them
 	for _, pa := range provider.Partners() {
+		if WebEveryAPIOnly {
+			continue
+		}
 		s.Presets = append(s.Presets, presetJSON{PresetDef: pa.PresetDef, Added: have[pa.ID], Notes: pa.Notes, Langs: pa.Langs, New: !have[pa.ID] && !provider.PartnerNoticed(pa.ID), OwnClient: presetOwnClient(pa.PresetDef)})
 	}
 	for _, pr := range provider.Presets() {
+		if WebEveryAPIOnly && pr.ID != "everyapi" {
+			continue
+		}
 		bases := provider.Provider{Chat: pr.Chat, Responses: pr.Responses, Anthropic: pr.Anthropic}
 		team := provider.TakesZhipuTeam(bases)
 		vendor, keyRegions := presetAccessKey(pr)

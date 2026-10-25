@@ -148,12 +148,10 @@ def main():
                 subprocess.run([binary, "--addr", f"127.0.0.1:{port}", "--healthcheck"], check=True,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
                 # Exercise the management Web API, starting without a bootstrap upstream key.
-                config = {"id": "everyapi", "preset": "everyapi", "name": "EveryAPI acceptance",
-                          "key": key, "chat": root + "/v1", "responses": root + "/v1",
-                          "anthropic": root, "gemini": root + "/v1beta", "models": all_models}
-                json_request("/api/provider/save", body=config)
-                models = json_request("/api/provider/models", body={"id": "everyapi"})
-                discovered = {m["id"] for m in models["provider"]["models"]}
+                config = {"key": key, "models": all_models}
+                json_request("/api/everyapi", body=config)
+                models = json_request("/api/everyapi/models", body={})
+                discovered = {m["id"] for m in models["providers"][0]["models"]}
                 assert set(all_models) <= discovered, "requested model was absent from upstream discovery"
                 model = "everyapi/" + args.model
                 listing = json_request("/v1/models", credential=client)

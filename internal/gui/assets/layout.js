@@ -6,6 +6,7 @@
   var web = !!(window.bootPrefs && window.bootPrefs.web);
   document.body.classList.add(mode);
   if (web) document.body.classList.add("web");
+  if (web && window.bootPrefs.everyapiOnly) document.body.classList.add("everyapi-only");
   // Preserve the existing iOS viewport policy before app.js runs.
   if (web && (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1))) {
     var viewport = document.querySelector('meta[name="viewport"]');

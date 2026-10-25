@@ -1,4 +1,5 @@
 /* These rules belong only to the standalone distribution. */
+.everyapi-only #addProvider, .everyapi-only #addSheet, .everyapi-only #providers, .everyapi-only #offProviders, .everyapi-only #offHead, .everyapi-only #excluded, .everyapi-only #providerDiscovery, .everyapi-only #nav [data-view="plugins"], .everyapi-only #nav [data-view="routing"] { display: none; }
 .everyapi-install { box-sizing: border-box; width: min(420px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, sans-serif; overflow: auto; }
 .everyapi-install::backdrop { background: rgb(0 0 0 / 40%); }
 .everyapi-install h2 { margin: 0 0 12px; font-size: 20px; }
@@ -8,3 +9,13 @@ body.web { min-height: 0; height: 100vh; height: 100dvh; }
 #pwaInstall { flex-shrink: 0; }
 /* WebKit keeps a long usage-file path unbroken on narrow screens. */
 body.web .usage-note { overflow-wrap: anywhere; }
+.everyapi-config { width: min(100%, 720px); margin: 0 auto; padding: 16px; box-sizing: border-box; }
+.everyapi-field { margin: 20px 0; }
+.everyapi-field label { display: block; margin-bottom: 8px; font-weight: 600; }
+.everyapi-field input, .everyapi-field select { width: 100%; min-height: 44px; box-sizing: border-box; padding: 10px 12px; font-size: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.everyapi-models { min-width: 0; margin: 24px 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; }
+.everyapi-model { display: flex; gap: 12px; align-items: center; min-height: 44px; overflow-wrap: anywhere; }
+.everyapi-model input { flex: 0 0 auto; width: 20px; height: 20px; }
+.everyapi-model span { min-width: 0; }
+.everyapi-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.everyapi-actions button { min-height: 44px; font-size: 16px; }

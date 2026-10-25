@@ -1,6 +1,6 @@
 # EveryAPI Web Gateway
 
-A separately deployable, single-user gateway distribution based on Magpie. It connects to EveryAPI through its public API; it does not require changes to the EveryAPI backend, a desktop session, Redis, or an external database. The embedded Magpie Web UI manages providers, model lists, routing groups, gateway keys, budgets and request usage.
+A separately deployable, single-user gateway distribution based on Magpie. It connects to EveryAPI through its public API; it does not require changes to the EveryAPI backend, a desktop session, Redis, or an external database. The console configures one EveryAPI connection, its region and exposed models, plus gateway keys, budgets, sessions and request usage. It has no provider picker, Add provider flow, routing-group page or external-plugin marketplace.
 
 ## Start with Docker Compose
 
@@ -11,7 +11,7 @@ docker compose --env-file .env.everyapi -f compose.everyapi.yaml up -d --build
 docker compose --env-file .env.everyapi -f compose.everyapi.yaml exec gateway cat /var/lib/everyapi-web/admin-key
 ```
 
-Open `http://127.0.0.1:8080` and paste the administrator key. If you supplied `EVERYAPI_WEB_KEY`, sign in with that value instead; no generated administrator key file is needed. With an upstream key supplied, the first Providers row is EveryAPI; open it and fetch its model list. Without a supplied upstream key, Providers starts empty: use Add → EveryAPI, choose the region, enter the key and save. If using a custom upstream, add a custom provider with its protocol URLs instead. Gateway → Gateway keys manages separate client credentials, model restrictions and usage budgets. Routing groups can distribute requests across models or keys and provide fallback.
+Open `http://127.0.0.1:8080` and enter the separate management password. It is supplied by `EVERYAPI_WEB_KEY` / `EVERYAPI_WEB_KEY_FILE`, or generated in `admin-key` when neither is supplied. After signing in, the EveryAPI page directly accepts an API key and region; Save and refresh models discovers the list, and checkboxes select which models the gateway exposes. A blank API-key field keeps the saved key. There is no supplier-selection step. Gateway → Gateway keys manages separate client credentials, model restrictions and usage budgets.
 
 The page and client API share port 8080. Only that port is published. The default host binding is loopback. Set `EVERYAPI_BIND_IP=0.0.0.0` for access from other machines and use an HTTPS reverse proxy for an Internet deployment. Forward the original host, scheme and client address; proxy streaming without buffering. Do not mount the operator's home or agent credentials into this container. This is one administrator's gateway, not a multi-tenant billing or account-registration service.
 
@@ -44,7 +44,7 @@ Set `EVERYAPI_PUBLIC_URL` to the reachable HTTPS origin, for example `https://ga
 
 Offline mode stores only a public, credential-free reconnect page. Management pages, settings, request history, API responses and keys are not put into Cache Storage. Calls and console operations still need the gateway online. The launch URL is `/`, never a key-bearing sign-in link. Only the manifest, icons, worker and reconnect page are readable without a sign-in cookie; management APIs retain authentication.
 
-`MOBILE_PWA=1 node scripts/everyapi-web-smoke.cjs dist/everyapi-web` adds real-worker mobile acceptance to the normal disposable-server smoke. It checks Chinese and English at 320, 375, 390, 430 and 768 pixels wide plus landscape, touch navigation, provider save/discovery, login expiry with a controlling worker, Cache Storage contents and a real interrupted local connection followed by reconnect. Run it with Chromium and with `BROWSER=webkit`; browser emulation does not establish a successful installation on a physical iPhone.
+`MOBILE_PWA=1 node scripts/everyapi-web-smoke.cjs dist/everyapi-web` adds real-worker mobile acceptance to the normal disposable-server smoke. It checks Chinese and English at 320, 375, 390, 430 and 768 pixels wide plus landscape, touch navigation, EveryAPI save/discovery, login expiry with a controlling worker, Cache Storage contents and a real interrupted local connection followed by reconnect. Run it with Chromium and with `BROWSER=webkit`; browser emulation does not establish a successful installation on a physical iPhone.
 
 ## Connect a client
 
@@ -75,7 +75,7 @@ Gateway → Connect selects an enabled client key for its copyable examples, inc
 | --- | --- | --- |
 | `EVERYAPI_REGION` | `global` | Initial upstream: `global` → `https://api.everyapi.ai`; `cn` → `https://api-cn.everyapi.ai` |
 | `EVERYAPI_API_BASE` | Region default | Initial self-hosted upstream origin or deployment prefix; a trailing `/v1` is removed before native endpoints are composed |
-| `EVERYAPI_API_KEY` | Empty | Initial upstream API key; without it, start with no provider and add EveryAPI through Providers |
+| `EVERYAPI_API_KEY` | Empty | Initial upstream API key; without it, enter the key directly on the EveryAPI page |
 | `EVERYAPI_WEB_KEY` | Generated and persisted | Administrator sign-in key, at least 16 letters, digits or `-._~` |
 | `EVERYAPI_GATEWAY_KEY` | Generated and persisted | Initial client key; 16–256 printable ASCII characters, different from the administrator/upstream keys |
 | `EVERYAPI_DATA_DIR` | OS config directory / `everyapi-web` | Absolute persistent directory; `--data-dir` takes precedence |
@@ -101,7 +101,7 @@ secrets:
 
 Pass both files with `-f compose.everyapi.yaml -f <your-override.yaml>`. The mounted file must be readable by container UID 65532. Generated key files have mode 0600 and keys are not printed in startup logs. The Compose sample intentionally contains no credentials. Exclude `.env.everyapi`, secret files and the data directory from version control.
 
-Upstream and client credentials are bootstrapped only when their respective Magpie stores do not exist. An upstream provider is created only when an upstream key is supplied; region/base environment values apply to that bootstrap. Web setup selects its own region and URLs. Subsequent Web edits, key rotation, key revocation and provider deletion survive restarts; changing bootstrap environment values is not a configuration migration. Use Providers and Gateway for later changes. `EVERYAPI_WEB_KEY` remains a runtime override of the saved administrator key. An unreadable store fails startup; a provider store with a valid Magpie backup uses that backup according to Magpie's existing recovery rules.
+Upstream and client credentials are bootstrapped only when their respective Magpie stores do not exist. An upstream provider is created only when an upstream key is supplied; region/base environment values apply to that bootstrap. Web setup selects the global or China region; an explicitly configured custom bootstrap base is retained until the region is changed. Subsequent Web edits, model selection, key rotation and key revocation survive restarts; changing bootstrap environment values is not a configuration migration. Use EveryAPI and Gateway for later changes. `EVERYAPI_WEB_KEY` remains a runtime override of the saved administrator key. An unreadable store fails startup; a provider store with a valid Magpie backup uses that backup according to Magpie's existing recovery rules.
 
 The Docker volume contains the isolated home, provider settings, generated keys, caches and request history. Back it up as sensitive server data. `docker compose down` preserves it; `down -v` deletes it. `everyapi-web --healthcheck` checks the Web sign-in listener without bootstrapping or changing files. An occupied internal gateway port fails startup instead of silently attaching to another local gateway.
 

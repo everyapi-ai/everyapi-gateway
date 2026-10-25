@@ -165,6 +165,7 @@ func prepare(data, addr string) error {
 	if err != nil {
 		return err
 	}
+	gui.WebEveryAPIBase = root
 	admin, err := secret("EVERYAPI_WEB_KEY")
 	if err != nil {
 		return err
@@ -252,6 +253,11 @@ func prepare(data, addr string) error {
 		return err
 	} else if err := provider.FileError(); err != nil {
 		return err
+	}
+	for _, p := range provider.All() {
+		if p.ID != "everyapi" || p.Preset != "everyapi" {
+			return errors.New("everyapi-web supports only EveryAPI; use a separate data directory for Magpie configurations")
+		}
 	}
 	if _, err := access.List(); err != nil {
 		return err

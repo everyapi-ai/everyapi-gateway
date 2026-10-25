@@ -21,7 +21,7 @@ func TestWebDistributionName(t *testing.T) {
 	}
 	w := httptest.NewRecorder()
 	webTurnedAway(w, httptest.NewRequest("GET", "/", nil), "/", "Sign in")
-	if w.Code != 401 || !strings.Contains(w.Body.String(), "EveryAPI Gateway") || !strings.Contains(w.Body.String(), "EVERYAPI_WEB_KEY") {
+	if w.Code != 401 || !strings.Contains(w.Body.String(), "EveryAPI Gateway") || strings.Contains(w.Body.String(), "EVERYAPI_WEB_KEY") || strings.Contains(w.Body.String(), "admin-key") {
 		t.Fatal("distribution's sign-in page uses the wrong product or key")
 	}
 	WebName = "<script>bad</script>"
@@ -39,11 +39,11 @@ func TestWebDistributionSignInLanguage(t *testing.T) {
 	const key = "private-administrator-key-123456"
 	h := webGuard("session", key, webCookieAge, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	for _, tc := range []struct{ pref, accept, lang, button, missing, wrong, stale string }{
-		{"zh", "en-US", "zh", "登录", "请输入管理员密钥", "管理员密钥不正确", "登录已失效"},
-		{"en", "zh-CN", "en", "Sign in", "Enter your administrator key", "Incorrect administrator key", "Your sign-in has expired"},
-		{"system", "zh-TW,zh;q=0.9", "zh-TW", "登入", "請輸入管理員金鑰", "管理員金鑰不正確", "登入已失效"},
-		{"system", "ja-JP,en;q=0.8", "ja", "ログイン", "管理者キーを入力", "管理者キーが正しくありません", "ログインの有効期限が切れました"},
-		{"de", "en", "de", "Anmelden", "Administratorschlüssel eingeben", "Falscher Administratorschlüssel", "Ihre Anmeldung ist abgelaufen"},
+		{"zh", "en-US", "zh", "登录", "请输入管理密码", "管理密码不正确", "登录已失效"},
+		{"en", "zh-CN", "en", "Sign in", "Enter your management password", "Incorrect management password", "Your sign-in has expired"},
+		{"system", "zh-TW,zh;q=0.9", "zh-TW", "登入", "請輸入管理密碼", "管理密碼不正確", "登入已失效"},
+		{"system", "ja-JP,en;q=0.8", "ja", "ログイン", "管理パスワードを入力", "管理パスワードが正しくありません", "ログインの有効期限が切れました"},
+		{"de", "en", "de", "Anmelden", "Verwaltungspasswort eingeben", "Falsches Verwaltungspasswort", "Ihre Anmeldung ist abgelaufen"},
 	} {
 		t.Run(tc.lang, func(t *testing.T) {
 			if err := settings.Save(settings.Settings{Lang: tc.pref}); err != nil {

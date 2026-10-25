@@ -11,6 +11,7 @@ if (mode === "panel" && !document.body.classList.contains("linux")) $("header.to
 // `magpie web`: the page in a browser tab, with no window of the app's
 // around it — it opens links itself, and what is the desktop's is left out
 const web = !!window.bootPrefs?.web;
+const everyapiOnly = web && !!window.bootPrefs?.everyapiOnly;
 // layout.js applies the mode and platform before the header can paint.
 // Gateway mode (gatewaymode.go): magpie web on a server that is only the
 // gateway for other computers' agents leaves out this computer's agents'
@@ -5823,7 +5824,7 @@ async function loadProvidersNow() {
   // a reload's provider may be gone since
   if (typeof editing === "string" && !providers.providers.some((p) => p.id === editing)) editing = null;
   // a providers.json that can't be read is not a first use: no Add sheet
-  if (!providers.providers.length && editing === null && !providers.fileError) adding = true;
+  if (!everyapiOnly && !providers.providers.length && editing === null && !providers.fileError) adding = true;
   if (providersPage(view)) {
     magpie.call(view, "render", was);
     backToReader($("#view-" + view));
@@ -5929,6 +5930,7 @@ function markUpstream() {
 // Rows in the shape of the list while it is first asked for; a reload keeps
 // the list it has until the new one is in.
 function renderProvidersLoading() {
+  if (everyapiOnly) return renderEveryAPI();
   const page = $("#view-providers");
   page.classList.add("loading");
   page.setAttribute("aria-busy", "true");
@@ -5962,6 +5964,7 @@ $("#foldOff").onclick = () => {
 // One row per provider: logo, name, the agents pointed at it, key status.
 // Everything else lives in the editor, a dialog over the page.
 function renderProviders() {
+  if (everyapiOnly) return renderEveryAPI();
   if (accountArranging || providerArranging) { accountRenderPending = true; return; }
   // Rebuilding the list empties the page for a moment, which clamps its
   // scroll to the top; put it back so closing the editor leaves the reader
@@ -10245,6 +10248,7 @@ function fetchImportIcon(p, head, ed) {
 // cannot put the pre-import hint back. Ignored configurations stay quiet
 // across launches; new or changed ones can still be offered.
 async function discoverLocalProviders(force = false) {
+  if (everyapiOnly) return;
   if (mode !== "window" || view !== "providers" || providers?.fileError) return;
   if (!force && (discoveryPending || Date.now() - discoveryAt < 60000)) return;
   const run = ++discoveryRun;
@@ -23577,6 +23581,7 @@ for (const v of document.querySelectorAll(".view")) {
 async function show(v) {
   // a built-in page a plugin's page replaces (magpie.page.replaces) opens that
   v = magpie.replacing?.(v) || v;
+  if (everyapiOnly && ["plugins", "routing"].includes(v)) v = "providers";
   // a page gateway mode leaves out (a link to it, an address kept) opens Providers
   if (gatewayMode && GATEWAY_HIDES.includes(v)) v = "providers";
   // and one a built-in plugin switched off has, Agents
@@ -23604,7 +23609,7 @@ async function show(v) {
   view = v;
   // the page the reader leaves is the one the window opens on next (keptView)
   if (mode === "window") { try { localStorage.setItem("magpie.lastView", v); } catch { /* not kept */ } }
-  const title = magpie.page(v)?.title ?? ({ agents: "Agents", providers: "Providers", plugins: "Plugins", settings: "Settings" })[v];
+  const title = everyapiOnly && v === "providers" ? "EveryAPI" : magpie.page(v)?.title ?? ({ agents: "Agents", providers: "Providers", plugins: "Plugins", settings: "Settings" })[v];
   $("#pageTitle").dataset.en = title;
   $("#pageTitle").textContent = t(title);
   if (mode === "window") {
@@ -23674,7 +23679,7 @@ function setGatewayMode(on) {
 // plugin switched off leaves out
 function navHides() {
   if (mode !== "window") return;
-  for (const b of $("#nav").querySelectorAll("button[data-view]")) b.hidden = (gatewayMode && GATEWAY_HIDES.includes(b.dataset.view)) || featureHides(b);
+  for (const b of $("#nav").querySelectorAll("button[data-view]")) b.hidden = (everyapiOnly && ["plugins", "routing"].includes(b.dataset.view)) || (gatewayMode && GATEWAY_HIDES.includes(b.dataset.view)) || featureHides(b);
 }
 // applyFeatures takes the built-in plugins' state from a read of the
 // settings, or a switch on Plugins › Built-in:
@@ -24572,6 +24577,7 @@ setInterval(renderUpdateBadge, 15 * 60 * 1000); // a window left open still hear
 // the reader (someone else's plugin, or one pinned; the community's update
 // by themselves)
 async function renderPluginDot() {
+  if (everyapiOnly) return;
   const b = mode === "window" && document.querySelector('#nav button[data-view="plugins"]');
   if (!b) return;
   const u = await api("plugins/updates").catch(() => null);
@@ -24823,4 +24829,4 @@ if (mode === "window" && params.get("import")) {
     if (providers && view === "providers") renderProviders();
   }).catch(() => {});
 }
-if (mode === "window" && params.get("view") === "providers" && params.get("edit")) editing = params.get("edit");
+if (!everyapiOnly && mode === "window" && params.get("view") === "providers" && params.get("edit")) editing = params.get("edit");

@@ -40,11 +40,12 @@ func main() {
 		fatal(fmt.Errorf("internal gateway address %s is already in use; set EVERYAPI_INTERNAL_ADDR to another loopback address", gateway.Addr()))
 	}
 	gui.WebName = "EveryAPI Gateway"
+	gui.WebEveryAPIOnly = true
 	gui.WebGateway.Store(true)
 	gateway.RequireClientKey = true
 	fmt.Println("EveryAPI Web Gateway · powered by Magpie")
 	fmt.Println("Data:", *data)
-	fmt.Println("Admin key: EVERYAPI_WEB_KEY, or admin-key in the data directory")
+	fmt.Println("Management password: EVERYAPI_WEB_KEY / EVERYAPI_WEB_KEY_FILE, or admin-key when generated locally")
 	os.Args = []string{os.Args[0], "serve", "--web=" + *addr}
 	cli.Main(version)
 }

@@ -51,7 +51,7 @@ async function main() {
     child = spawn(path.resolve(process.argv[2] || 'dist/everyapi-web'), ['--data-dir', data, '--addr', `127.0.0.1:${webPort}`], {
       env: {
         ...process.env,
-        EVERYAPI_API_BASE: 'https://api.everyapi.ai',
+        EVERYAPI_API_BASE: base,
         EVERYAPI_API_KEY: '',
         EVERYAPI_API_KEY_FILE: '',
         EVERYAPI_WEB_KEY: admin,
@@ -80,7 +80,7 @@ async function main() {
       child.once('error', err => { clearTimeout(timer); reject(err); });
       child.once('exit', code => { clearTimeout(timer); reject(new Error(`gateway exited ${code}: ${output}`)); });
     });
-    assert(!output.includes(admin), 'startup log leaked administrator key');
+    assert(!output.includes(admin), 'startup log leaked management password');
     assert(!output.includes(client), 'startup log leaked client key');
     assert(!output.includes(upstreamKey), 'startup log leaked upstream key');
     await promisify(execFile)(path.resolve(process.argv[2] || 'dist/everyapi-web'), ['--addr', `127.0.0.1:${webPort}`, '--healthcheck'], { timeout: 5000 });
@@ -95,7 +95,7 @@ async function main() {
     await page.goto(address);
     await page.locator('input[name=key]').fill(admin);
     await page.locator('button[type=submit]').click();
-    await page.waitForFunction(() => document.body?.classList.contains('gateway-mode') && document.querySelector('#addSheet .tile'));
+    await page.waitForFunction(() => document.body?.classList.contains('gateway-mode') && document.querySelector('#everyapiConfig'));
     assert.equal(await page.title(), 'EveryAPI Gateway');
     assert.equal(await page.locator('.brand').innerText(), 'EveryAPI Gateway');
     assert.equal(await page.locator('[data-view=agents]').isVisible(), false, 'server showed local-agent controls');
@@ -103,26 +103,21 @@ async function main() {
     assert.equal(state.gatewayOn, true);
     assert.equal(state.noAccountDiscovery, true);
     assert.equal(state.noAutoUpdate, true);
-    // A default install must reach Web setup with no upstream key. Configure
-    // the fixture through the same authenticated API the provider form uses.
-    const saved = await page.evaluate(async ({ base, key }) => {
-      const response = await fetch('/api/provider/save', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: 'everyapi', name: 'EveryAPI', preset: 'everyapi', new: true, key,
-          chat: base + '/v1', responses: base + '/v1', anthropic: base, gemini: base + '/v1beta' }),
-      });
-      return response.status;
-    }, { base, key: upstreamKey });
-    assert.equal(saved, 200, 'initial Web provider configuration failed');
-    await page.evaluate(() => loadProviders());
-    await page.waitForFunction(() => document.querySelector('#providers')?.textContent.includes('EveryAPI'));
+    // Configure the single EveryAPI connection through its real UI, from a blank-key install.
+    await page.locator('#everyapiAPIKey').fill(upstreamKey);
+    const fetched = page.waitForResponse(r => new URL(r.url()).pathname === '/api/everyapi/models');
+    await page.getByRole('button', { name: 'Save and refresh models', exact: true }).click();
+    assert.equal((await fetched).status(), 200);
+    await page.locator('#everyapiConfig input[name=models]').waitFor();
     const providers = await page.evaluate(() => fetch('/api/providers').then(r => r.json()));
-    assert.equal(providers.gateway.url, address, 'Web UI advertised a private internal listener');
+    assert.deepEqual(providers.providers.map(p => p.id), ['everyapi']);
+    assert.deepEqual(providers.presets.map(p => p.id), ['everyapi']);
+    assert.equal(providers.gateway.url, address);
     assert.equal(providers.gateway.requireClientKey, true);
-    await page.locator('#providers .row.provider[data-id=everyapi]').click();
-    const fetched = page.waitForResponse(r => new URL(r.url()).pathname === '/api/provider/models');
-    await page.locator('.fetch-models').click();
-    assert.equal((await fetched).status(), 200, 'Web model refresh failed');
+    assert.equal(await page.locator('#addProvider').isVisible(), false);
+    assert.equal(await page.locator('[data-view=plugins]').isVisible(), false);
+    assert.equal(await page.locator('[data-view=routing]').isVisible(), false);
+    assert.equal(await page.evaluate(async () => (await fetch('/api/provider/save', { method: 'POST', body: JSON.stringify({ id: 'other', preset: 'openai', key: 'no' }) })).status), 404);
     const listing = await fetch(address + '/v1/models', { headers: { Authorization: `Bearer ${client}` } });
     assert.equal(listing.status, 200);
     assert((await listing.json()).data.some(m => m.id === 'everyapi/smoke-model'), 'discovered model missing from client API');
@@ -133,8 +128,6 @@ async function main() {
     });
     assert.equal(relay.status, 200);
     assert.equal((await relay.json()).choices[0].message.content, 'smoke passed');
-    await page.locator('#modal').getByRole('button', { name: 'Cancel', exact: true }).click();
-    await page.locator('#modal').waitFor({ state: 'hidden' });
     await page.locator('[data-view=gateway]').click();
     await page.locator('#view-gateway').waitFor({ state: 'visible' });
     await page.waitForFunction(key => document.querySelector('#connect .snip')?.textContent.includes(key), client);
@@ -147,11 +140,11 @@ async function main() {
     if (process.argv[3]) await page.screenshot({ path: path.resolve(process.argv[3]), fullPage: true });
     assert.deepEqual(pageErrors, [], 'browser threw JavaScript errors');
     for (const [lang, button, wrong, stale, install] of [
-      ['zh', '登录', '管理员密钥不正确', '登录已失效', '安装应用'],
-      ['en', 'Sign in', 'Incorrect administrator key', 'Your sign-in has expired', 'Install app'],
-      ['zh-TW', '登入', '管理員金鑰不正確', '登入已失效', '安裝應用程式'],
-      ['ja', 'ログイン', '管理者キーが正しくありません', 'ログインの有効期限が切れました', 'アプリをインストール'],
-      ['de', 'Anmelden', 'Falscher Administratorschlüssel', 'Ihre Anmeldung ist abgelaufen', 'App installieren'],
+      ['zh', '登录', '管理密码不正确', '登录已失效', '安装应用'],
+      ['en', 'Sign in', 'Incorrect management password', 'Your sign-in has expired', 'Install app'],
+      ['zh-TW', '登入', '管理密碼不正確', '登入已失效', '安裝應用程式'],
+      ['ja', 'ログイン', '管理パスワードが正しくありません', 'ログインの有効期限が切れました', 'アプリをインストール'],
+      ['de', 'Anmelden', 'Falsches Verwaltungspasswort', 'Ihre Anmeldung ist abgelaufen', 'App installieren'],
     ]) {
       await page.evaluate(async lang => {
         const settings = await fetch('/api/settings').then(r => r.json());
@@ -164,7 +157,7 @@ async function main() {
         await login.route('**/*', route => new URL(route.request().url()).origin === address ? route.continue() : route.abort());
         assert.equal((await login.goto(address)).status(), 401);
         assert.equal(await login.locator('html').getAttribute('lang'), lang);
-        assert.equal(await login.getByLabel(lang === 'zh' ? '管理员密钥' : lang === 'zh-TW' ? '管理員金鑰' : lang === 'ja' ? '管理者キー' : lang === 'de' ? 'Administratorschlüssel' : 'Administrator key', { exact: true }).count(), 1);
+        assert.equal(await login.getByLabel(lang === 'zh' ? '管理密码' : lang === 'zh-TW' ? '管理密碼' : lang === 'ja' ? '管理パスワード' : lang === 'de' ? 'Verwaltungspasswort' : 'Management password', { exact: true }).count(), 1);
         assert(!(await login.locator('body').innerText()).includes('per host, not per port'));
         await login.locator('input[name=key]').fill('wrong-administrator-key');
         await login.getByRole('button', { name: button, exact: true }).click();

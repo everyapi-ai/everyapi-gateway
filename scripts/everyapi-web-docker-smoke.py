@@ -98,7 +98,7 @@ def main():
                "--read-only", "--tmpfs", "/tmp:size=256m,mode=1777",
                "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                "-p", f"127.0.0.1:{port}:8080", "-v", NAME + ":/var/lib/everyapi-web",
-               "-e", "EVERYAPI_API_BASE=https://api.everyapi.ai",
+               "-e", "EVERYAPI_API_BASE=" + upstream,
                "-e", "EVERYAPI_PUBLIC_URL=" + base,
                "-e", "HTTP_PROXY=" + upstream, "-e", "HTTPS_PROXY=" + upstream,
                "-e", "NO_PROXY=host.docker.internal,127.0.0.1,localhost", IMAGE)
@@ -122,13 +122,11 @@ def main():
         for key in [admin, UPSTREAM_KEY, "arbitrary-invalid-client-key"]:
             assert request("/v1/models", key)[0] == 401, "non-client key bypassed authentication"
         assert request("/_magpie/sign-in", body={"key": admin, "back": "/"}, form=True)[0] == 200
-        assert request("/api/provider/save", body={"id": "everyapi", "name": "EveryAPI", "preset": "everyapi", "new": True,
-                       "key": UPSTREAM_KEY, "chat": upstream + "/v1", "responses": upstream + "/v1",
-                       "anthropic": upstream, "gemini": upstream + "/v1beta"})[0] == 200
+        assert request("/api/everyapi", body={"key": UPSTREAM_KEY})[0] == 200
         docker("exec", NAME, "everyapi-web", "--healthcheck")
         assert json.loads(docker("inspect", "--format", "{{json .Config.User}}", NAME)) == "65532:65532"
-        status, body = request("/api/provider/models", body={"id": "everyapi"})
-        assert status == 200 and json.loads(body)["count"] > 0, "Web model refresh failed"
+        status, body = request("/api/everyapi/models", body={})
+        assert status == 200 and len(json.loads(body)["providers"][0]["models"]) > 0, "Web model refresh failed"
         status, body = request("/v1/models", client)
         assert status == 200 and any(m["id"] == "everyapi/docker-smoke-model" for m in json.loads(body)["data"])
         status, body = request("/v1/chat/completions", client, {"model": "everyapi/docker-smoke-model", "messages": [{"role": "user", "content": "hello"}]})
