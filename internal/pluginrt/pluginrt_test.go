@@ -88,9 +88,7 @@ func TestCompatible(t *testing.T) {
 	}
 }
 
-// Core never imports a plugin, and a plugin never imports another: they
-// reach each other through services. main.go and plugins/all alone gather
-// them; a test may too.
+// Core never imports a plugin, and a plugin never imports another: they reach each other through services. Executable entry points and plugins/all gather them; a test may too.
 func TestPluginsImportOnlyCore(t *testing.T) {
 	root := filepath.Join("..", "..")
 	const mod = "github.com/yetone/magpie/plugins/"
@@ -119,7 +117,7 @@ func TestPluginsImportOnlyCore(t *testing.T) {
 				continue
 			}
 			switch {
-			case rel == "main.go" && p == mod+"all":
+			case (rel == "main.go" || rel == "cmd/everyapi-web/main.go") && p == mod+"all":
 			case strings.HasPrefix(rel, "plugins/all/"):
 			case strings.HasPrefix(rel, "plugins/"):
 				t.Errorf("%s imports %s: a plugin never imports another", rel, p)

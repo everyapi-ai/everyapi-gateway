@@ -9,6 +9,7 @@ import (
 	"github.com/yetone/magpie/internal/cli"
 	"github.com/yetone/magpie/internal/gateway"
 	"github.com/yetone/magpie/internal/gui"
+	_ "github.com/yetone/magpie/plugins/all"
 )
 
 var version = "everyapi-dev"

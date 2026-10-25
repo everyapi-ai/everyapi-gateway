@@ -78,7 +78,7 @@ module.exports = async function mobile(browser, address, admin, client, upstream
         await providerKey.fill(upstreamKey);
         assert(await providerKey.evaluate(node => parseFloat(getComputedStyle(node).fontSize) >= 16));
         // Magpie preserves reading position against scripted auto-scroll. A trusted scroll key reaches the actions before the touch tap, including mobile WebKit without mouse-wheel support.
-        if (height < 500) await page.locator('#view-providers').press('End');
+        await page.locator('#view-providers').press('End');
         const [refreshed] = await Promise.all([page.waitForResponse(r => new URL(r.url()).pathname === '/api/everyapi/models', { timeout: 20000 }), page.getByRole('button', { name: lang === 'zh' ? '保存并刷新模型' : 'Save and refresh models', exact: true }).tap({ timeout: 20000 })]);
         assert.equal(refreshed.status(), 200);
         await page.locator('#everyapiConfig input[name=models]').waitFor();

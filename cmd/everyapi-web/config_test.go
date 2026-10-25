@@ -14,6 +14,7 @@ import (
 	"github.com/yetone/magpie/internal/access"
 	"github.com/yetone/magpie/internal/agentenv"
 	"github.com/yetone/magpie/internal/gateway"
+	"github.com/yetone/magpie/internal/pluginrt"
 	"github.com/yetone/magpie/internal/provider"
 	"github.com/yetone/magpie/internal/settings"
 	"github.com/yetone/magpie/internal/testenv"
@@ -187,6 +188,54 @@ func TestSecretFilesAndInvalidConfiguration(t *testing.T) {
 				t.Fatal("invalid configuration changed persistent state")
 			}
 		})
+	}
+}
+
+func TestEveryAPIMaskingRelay(t *testing.T) {
+	isolate(t)
+	const sensitive = "private-project-acceptance"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct{ Content string } `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Messages) != 1 {
+			t.Error("upstream received an invalid request")
+			w.WriteHeader(400)
+			return
+		}
+		text := body.Messages[0].Content
+		if strings.Contains(text, sensitive) || !strings.Contains(text, "{{") {
+			t.Error("upstream received an unmasked value")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "masked", "object": "chat.completion", "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": text}, "finish_reason": "stop"}}})
+	}))
+	defer upstream.Close()
+	t.Setenv("EVERYAPI_API_BASE", upstream.URL)
+	t.Setenv("EVERYAPI_API_KEY", "test-upstream-key")
+	if err := prepare(t.TempDir(), "127.0.0.1:8080"); err != nil {
+		t.Fatal(err)
+	}
+	st := settings.Load()
+	st.RedactWords = []string{sensitive}
+	if err := settings.Save(st); err != nil {
+		t.Fatal(err)
+	}
+	rt := pluginrt.New(pluginrt.Registered())
+	defer rt.Stop()
+	rt.Reconcile(map[string]bool{"redact": true}, nil)
+	p, _ := provider.Find("everyapi")
+	p.Models = []string{"demo-model"}
+	if err := provider.Save(*p); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"everyapi/demo-model","messages":[{"role":"user","content":"`+sensitive+`"}]}`))
+	r.RemoteAddr = "127.0.0.1:50000"
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	gateway.New().Front().ServeHTTP(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), sensitive) {
+		t.Fatalf("masking relay did not restore the reply: %d %s", w.Code, w.Body.String())
 	}
 }
 

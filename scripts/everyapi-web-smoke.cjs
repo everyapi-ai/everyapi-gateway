@@ -121,6 +121,11 @@ async function main() {
     const listing = await fetch(address + '/v1/models', { headers: { Authorization: `Bearer ${client}` } });
     assert.equal(listing.status, 200);
     assert((await listing.json()).data.some(m => m.id === 'everyapi/smoke-model'), 'discovered model missing from client API');
+    await page.evaluate(async () => {
+      const settings = await fetch('/api/settings').then(r => r.json());
+      const saved = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, redact: true }) });
+      if (!saved.ok) throw new Error('masking configuration failed');
+    });
     const relay = await fetch(address + '/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${client}`, 'Content-Type': 'application/json' },
