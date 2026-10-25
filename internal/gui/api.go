@@ -837,7 +837,14 @@ func Handler(w Windows, gw *gateway.Server) http.Handler {
 		webPage.Store(true)
 	}
 	mux := http.NewServeMux()
+	// The standalone EveryAPI distribution opens directly into the mobile
+	// chat. Keep Magpie's full management console available at /settings.
+	if WebEveryAPIOnly && isWeb(w) {
+		mux.HandleFunc("GET /{$}", webChatPage)
+		mux.HandleFunc("GET /settings", webConsolePage)
+	}
 	mux.Handle("/", devPage(revalidated(http.FileServer(http.FS(staticFS())))))
+	webChatRoutes(mux)
 	devRoutes(mux)
 	pluginPageRoutes(mux)
 	// boot.js hands the page the saved language and theme before it paints:
