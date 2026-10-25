@@ -87,7 +87,7 @@ async function main() {
     const noKey = await fetch(address + '/v1/models');
     assert.equal(noKey.status, 401, 'loopback client bypassed authentication');
     const engine = process.env.BROWSER === 'webkit' ? webkit : chromium;
-    browser = await engine.launch({ headless: true, ...(engine === chromium && process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}) });
+    browser = await engine.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}) });
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'en-US', reducedMotion: 'reduce' });
     const pageErrors = [];
     page.on('pageerror', err => pageErrors.push(err.message));
@@ -146,6 +146,48 @@ async function main() {
     await page.evaluate(() => document.fonts.ready);
     if (process.argv[3]) await page.screenshot({ path: path.resolve(process.argv[3]), fullPage: true });
     assert.deepEqual(pageErrors, [], 'browser threw JavaScript errors');
+    for (const [lang, button, wrong, stale] of [
+      ['zh', '登录', '管理员密钥不正确', '登录已失效'],
+      ['en', 'Sign in', 'Incorrect administrator key', 'Your sign-in has expired'],
+      ['zh-TW', '登入', '管理員金鑰不正確', '登入已失效'],
+      ['ja', 'ログイン', '管理者キーが正しくありません', 'ログインの有効期限が切れました'],
+      ['de', 'Anmelden', 'Falscher Administratorschlüssel', 'Ihre Anmeldung ist abgelaufen'],
+    ]) {
+      await page.evaluate(async lang => {
+        const settings = await fetch('/api/settings').then(r => r.json());
+        const saved = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...settings, lang }) });
+        if (!saved.ok) throw new Error('language save failed');
+      }, lang);
+      const context = await browser.newContext({ locale: 'en-US' });
+      try {
+        const login = await context.newPage();
+        await login.route('**/*', route => new URL(route.request().url()).origin === address ? route.continue() : route.abort());
+        assert.equal((await login.goto(address)).status(), 401);
+        assert.equal(await login.locator('html').getAttribute('lang'), lang);
+        assert.equal(await login.getByLabel(lang === 'zh' ? '管理员密钥' : lang === 'zh-TW' ? '管理員金鑰' : lang === 'ja' ? '管理者キー' : lang === 'de' ? 'Administratorschlüssel' : 'Administrator key', { exact: true }).count(), 1);
+        assert(!(await login.locator('body').innerText()).includes('per host, not per port'));
+        await login.locator('input[name=key]').fill('wrong-administrator-key');
+        await login.getByRole('button', { name: button, exact: true }).click();
+        await login.getByRole('status').filter({ hasText: wrong }).waitFor();
+        assert.equal((await context.cookies()).length, 0);
+        assert.equal((await login.goto(address + '/?k=invalid-link-key')).status(), 401);
+        await login.getByRole('status').filter({ hasText: wrong }).waitFor();
+        assert.equal(await login.locator('input[name=back]').inputValue(), '/', 'invalid link credential survived in return URL');
+        await login.locator('input[name=key]').fill(admin);
+        await login.getByRole('button', { name: button, exact: true }).click();
+        await login.waitForFunction(() => document.body?.classList.contains('gateway-mode'));
+        assert.equal((await login.reload()).status(), 200, 'refresh lost authenticated browser session');
+        const cookies = await context.cookies();
+        const session = cookies.find(c => c.value === admin);
+        assert(session && session.httpOnly && session.expires > Date.now() / 1000, 'sign-in cookie must persist');
+        await context.addCookies([{ ...session, value: 'old-administrator-key' }]);
+        assert.equal((await login.goto(address)).status(), 401);
+        await login.getByRole('status').filter({ hasText: stale }).waitFor();
+      } finally {
+        await context.close();
+      }
+    }
+    console.log('PASS: localized sign-in in five languages, incorrect/stale credentials, persistent browser session after reload');
     console.log('PASS: blank-key startup, sign-in, Web provider configuration, EveryAPI branding, isolated gateway mode, model discovery, authenticated relay, usable connection examples, credential-safe startup logs');
   } finally {
     if (browser) await browser.close();
@@ -162,9 +204,9 @@ async function main() {
         signal('SIGTERM');
         try { await Promise.race([exited, new Promise(resolve => { timer = setTimeout(resolve, 10000); })]); }
         finally { clearTimeout(timer); }
-        signal('SIGKILL');
+        if (child.exitCode === null && child.signalCode === null) signal('SIGKILL');
         await exited;
-      } else signal('SIGKILL');
+      }
     }
     await new Promise(resolve => upstream.close(resolve));
     await fs.rm(data, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

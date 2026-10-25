@@ -217,13 +217,18 @@ func webGuard(cookie, key string, keep time.Duration, next http.Handler) http.Ha
 			return
 		}
 		if q := r.URL.Query(); q.Has("k") {
-			if !same(q.Get("k")) {
-				http.Error(rw, "this link's key is not this magpie web's: use the link it printed when it started", http.StatusUnauthorized)
-				return
-			}
+			valid := same(q.Get("k"))
 			q.Del("k")
 			u := *r.URL
 			u.RawQuery = q.Encode()
+			if !valid {
+				if WebName != "" && r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/html") {
+					webTurnedAway(rw, r, u.RequestURI(), webWrongKey)
+					return
+				}
+				http.Error(rw, "this link's key is not this magpie web's: use the link it printed when it started", http.StatusUnauthorized)
+				return
+			}
 			signIn(rw, r, u.RequestURI())
 			return
 		}
@@ -231,7 +236,7 @@ func webGuard(cookie, key string, keep time.Duration, next http.Handler) http.Ha
 			r.Body = http.MaxBytesReader(rw, r.Body, 4096)
 			back := localPath(r.PostFormValue("back"))
 			if !same(r.PostFormValue("key")) {
-				webTurnedAway(rw, r, back, "That key is not this magpie web's.")
+				webTurnedAway(rw, r, back, webWrongKey)
 				return
 			}
 			signIn(rw, r, back)
@@ -247,9 +252,9 @@ func webGuard(cookie, key string, keep time.Duration, next http.Handler) http.Ha
 				return
 			}
 		}
-		why, short := "This browser sent no sign-in cookie for this address. A browser keeps cookies per host, not per port, so another service on this host's other ports can take it away: by clearing its site data (a sign-out often does), or by filling the host's cookie limit. A page opened at another address than the one signed in at (an IP instead of a name) has none either.", "no cookie sent"
+		why, short := webMissingCookie, "no cookie sent"
 		if len(sent) > 0 {
-			why, short = "This browser's sign-in cookie holds a key that isn't this magpie web's: the key changed after it signed in (MAGPIE_WEB_KEY changed, or a start without it made a new one).", "its cookie holds another key"
+			why, short = webStaleCookie, "its cookie holds another key"
 		}
 		if r.Method != http.MethodGet || !strings.Contains(r.Header.Get("Accept"), "text/html") {
 			http.Error(rw, "open the link magpie web printed when it started: it carries the key. "+why, http.StatusUnauthorized)
@@ -259,6 +264,12 @@ func webGuard(cookie, key string, keep time.Duration, next http.Handler) http.Ha
 		webTurnedAway(rw, r, r.URL.RequestURI(), why)
 	})
 }
+
+const (
+	webMissingCookie = "This browser sent no sign-in cookie for this address. A browser keeps cookies per host, not per port, so another service on this host's other ports can take it away: by clearing its site data (a sign-out often does), or by filling the host's cookie limit. A page opened at another address than the one signed in at (an IP instead of a name) has none either."
+	webStaleCookie   = "This browser's sign-in cookie holds a key that isn't this magpie web's: the key changed after it signed in (MAGPIE_WEB_KEY changed, or a start without it made a new one)."
+	webWrongKey      = "That key is not this magpie web's."
+)
 
 // webSignInPath takes the key pasted into the form a page turned away shows.
 const webSignInPath = "/_magpie/sign-in"
@@ -277,10 +288,11 @@ func localPath(back string) string {
 // sees: why, and a field for the key that signs it in and comes back to
 // back. The key itself is never on it.
 func webTurnedAway(rw http.ResponseWriter, r *http.Request, back, why string) {
-	name, hint := "magpie web", "MAGPIE_WEB_KEY, or the k= in the link magpie web printed when it started"
 	if WebName != "" {
-		name, hint = WebName, "EVERYAPI_WEB_KEY, or the admin-key file in the data directory"
+		webDistributionSignIn(rw, r, back, why)
+		return
 	}
+	name, hint := "magpie web", "MAGPIE_WEB_KEY, or the k= in the link magpie web printed when it started"
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.Header().Set("Cache-Control", "no-store")
 	rw.WriteHeader(http.StatusUnauthorized)
