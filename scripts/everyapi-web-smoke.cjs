@@ -146,12 +146,12 @@ async function main() {
     await page.evaluate(() => document.fonts.ready);
     if (process.argv[3]) await page.screenshot({ path: path.resolve(process.argv[3]), fullPage: true });
     assert.deepEqual(pageErrors, [], 'browser threw JavaScript errors');
-    for (const [lang, button, wrong, stale] of [
-      ['zh', '登录', '管理员密钥不正确', '登录已失效'],
-      ['en', 'Sign in', 'Incorrect administrator key', 'Your sign-in has expired'],
-      ['zh-TW', '登入', '管理員金鑰不正確', '登入已失效'],
-      ['ja', 'ログイン', '管理者キーが正しくありません', 'ログインの有効期限が切れました'],
-      ['de', 'Anmelden', 'Falscher Administratorschlüssel', 'Ihre Anmeldung ist abgelaufen'],
+    for (const [lang, button, wrong, stale, install] of [
+      ['zh', '登录', '管理员密钥不正确', '登录已失效', '安装应用'],
+      ['en', 'Sign in', 'Incorrect administrator key', 'Your sign-in has expired', 'Install app'],
+      ['zh-TW', '登入', '管理員金鑰不正確', '登入已失效', '安裝應用程式'],
+      ['ja', 'ログイン', '管理者キーが正しくありません', 'ログインの有効期限が切れました', 'アプリをインストール'],
+      ['de', 'Anmelden', 'Falscher Administratorschlüssel', 'Ihre Anmeldung ist abgelaufen', 'App installieren'],
     ]) {
       await page.evaluate(async lang => {
         const settings = await fetch('/api/settings').then(r => r.json());
@@ -176,6 +176,9 @@ async function main() {
         await login.locator('input[name=key]').fill(admin);
         await login.getByRole('button', { name: button, exact: true }).click();
         await login.waitForFunction(() => document.body?.classList.contains('gateway-mode'));
+        await login.getByRole('button', { name: install, exact: true }).click();
+        await login.getByRole('heading', { name: install, exact: true }).waitFor();
+        await login.locator('dialog.everyapi-install button').click();
         assert.equal((await login.reload()).status(), 200, 'refresh lost authenticated browser session');
         const cookies = await context.cookies();
         const session = cookies.find(c => c.value === admin);
@@ -188,6 +191,7 @@ async function main() {
       }
     }
     console.log('PASS: localized sign-in in five languages, incorrect/stale credentials, persistent browser session after reload');
+    if (process.env.MOBILE_PWA) await require('./everyapi-web-mobile.cjs')(browser, address, admin, client, upstreamKey, page);
     console.log('PASS: blank-key startup, sign-in, Web provider configuration, EveryAPI branding, isolated gateway mode, model discovery, authenticated relay, usable connection examples, credential-safe startup logs');
   } finally {
     if (browser) await browser.close();

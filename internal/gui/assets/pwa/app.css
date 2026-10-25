@@ -1,0 +1,10 @@
+/* These rules belong only to the standalone distribution. */
+.everyapi-install { box-sizing: border-box; width: min(420px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 24px; border: 1px solid var(--line); border-radius: 16px; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, sans-serif; overflow: auto; }
+.everyapi-install::backdrop { background: rgb(0 0 0 / 40%); }
+.everyapi-install h2 { margin: 0 0 12px; font-size: 20px; }
+.everyapi-install p { margin: 0 0 24px; overflow-wrap: anywhere; }
+.everyapi-install button { min-height: 44px; min-width: 88px; font-size: 16px; }
+body.web { min-height: 0; height: 100vh; height: 100dvh; }
+#pwaInstall { flex-shrink: 0; }
+/* WebKit keeps a long usage-file path unbroken on narrow screens. */
+body.web .usage-note { overflow-wrap: anywhere; }

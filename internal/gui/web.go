@@ -348,7 +348,12 @@ func webServed(port, key string, keep time.Duration, page http.Handler) http.Han
 // webHandler is what `magpie web` on port serves: the page and its API
 // behind the key, compressed for the browser.
 func webHandler(port, key string, keep time.Duration, page http.Handler) http.Handler {
-	return webCompressed(webGuard("magpie_web_"+port, key, keep, page))
+	guard := webGuard("magpie_web_"+port, key, keep, page)
+	return webCompressed(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !webPWA(w, r) {
+			guard.ServeHTTP(w, r)
+		}
+	}))
 }
 
 // webCompressed gzips what `magpie web` sends a browser that takes it: the

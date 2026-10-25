@@ -806,6 +806,7 @@ func versionedPage(page []byte) []byte {
 		name := []byte(html.EscapeString(WebName))
 		page = bytes.Replace(page, []byte("<title>magpie</title>"), append(append([]byte("<title>"), name...), []byte("</title>")...), 1)
 		page = bytes.Replace(page, []byte("<span>magpie</span>"), append(append([]byte("<span>"), name...), []byte("</span>")...), 1)
+		page = bytes.Replace(page, []byte("</head>"), []byte(webPWAHead+`<link rel="stylesheet" href="pwa/app.css"><script src="pwa/app.js" defer></script></head>`), 1)
 	}
 	return pageFile.ReplaceAllFunc(page, func(m []byte) []byte {
 		g := pageFile.FindSubmatch(m)

@@ -22,18 +22,22 @@ var webLoginTranslations = map[string]webLoginWords{
 	"de":    {"Administratoranmeldung", "Administratorschlüssel", "Anmelden", "Verwenden Sie den Schlüssel aus der Datei admin-key im Datenverzeichnis des Gateways oder den Wert von EVERYAPI_WEB_KEY. Dieser unterscheidet sich von Ihrem EveryAPI-API-Schlüssel.", "Administratorschlüssel eingeben, um die Gateway-Verwaltung zu öffnen.", "Ihre Anmeldung ist abgelaufen. Geben Sie Ihren Administratorschlüssel erneut ein.", "Falscher Administratorschlüssel. Bitte versuchen Sie es erneut."},
 }
 
-var webLoginPage = template.Must(template.New("sign-in").Parse(`<!doctype html><html lang="{{.Lang}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>{{.Name}}</title>
-<style>html,body{background:#f5f6f8;color:#202124}body{font:15px/1.6 system-ui,sans-serif;margin:0;padding:12vh 20px;box-sizing:border-box}main{max-width:420px;margin:auto;padding:32px;background:#fff;border:1px solid #e1e4e8;border-radius:16px}h1{font-size:22px;margin:4px 0 16px}.brand{font-size:13px;color:#666}label{display:block;font-weight:600;margin-top:24px}input,button{font:inherit;box-sizing:border-box;width:100%;border-radius:8px;padding:10px 12px}input{border:1px solid #aeb4bc;background:#fff;color:#202124;margin:8px 0 16px}button{border:0;background:#202124;color:#fff;cursor:pointer}.hint{font-size:13px;color:#666;margin-bottom:0}@media(prefers-color-scheme:dark){html,body{background:#18191c;color:#eee}main{background:#222428;border-color:#3d4048}.brand,.hint{color:#b4bac4}input{background:#18191c;color:#eee;border-color:#6a707a}button{background:#eee;color:#202124}}</style></head>
+var webLoginPage = template.Must(template.New("sign-in").Parse(`<!doctype html><html lang="{{.Lang}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">{{.PWA}}<meta name="color-scheme" content="light dark"><title>{{.Name}}</title>
+<style>html,body{background:#f5f6f8;color:#202124}body{font:15px/1.6 system-ui,sans-serif;margin:0;padding:max(24px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));box-sizing:border-box;min-height:100vh;min-height:100dvh;display:flex;align-items:center}main{box-sizing:border-box;width:100%;max-width:420px;margin:auto;padding:clamp(20px,6vw,32px);background:#fff;border:1px solid #e1e4e8;border-radius:16px}h1{font-size:22px;margin:4px 0 16px}.brand{font-size:13px;color:#666}label{display:block;font-weight:600;margin-top:24px}input,button{font:inherit;font-size:16px;min-height:44px;box-sizing:border-box;width:100%;border-radius:8px;padding:10px 12px}input{border:1px solid #aeb4bc;background:#fff;color:#202124;margin:8px 0 16px}button{border:0;background:#202124;color:#fff;cursor:pointer}.hint{font-size:13px;color:#666;margin-bottom:0}@media(prefers-color-scheme:dark){html,body{background:#18191c;color:#eee}main{background:#222428;border-color:#3d4048}.brand,.hint{color:#b4bac4}input{background:#18191c;color:#eee;border-color:#6a707a}button{background:#eee;color:#202124}}</style></head>
 <body><main><div class="brand">{{.Name}}</div><h1>{{.Words.Title}}</h1><p role="status">{{.Message}}</p><form method="post" action="{{.Action}}"><input type="hidden" name="back" value="{{.Back}}"><label for="admin-key">{{.Words.Label}}</label><input id="admin-key" type="password" name="key" autocomplete="current-password" autofocus required><button type="submit">{{.Words.Button}}</button></form><p class="hint">{{.Words.Hint}}</p></main></body></html>`))
 
-func webDistributionSignIn(w http.ResponseWriter, r *http.Request, back, why string) {
-	lang := trayLang(settings.Load().Lang, func() string {
+func webSignInLang(r *http.Request) string {
+	return trayLang(settings.Load().Lang, func() string {
 		tags, _, _ := language.ParseAcceptLanguage(r.Header.Get("Accept-Language"))
 		if len(tags) > 0 {
 			return tags[0].String()
 		}
 		return "en"
 	})
+}
+
+func webDistributionSignIn(w http.ResponseWriter, r *http.Request, back, why string) {
+	lang := webSignInLang(r)
 	words := webLoginTranslations[lang]
 	message := words.Missing
 	switch why {
@@ -50,5 +54,6 @@ func webDistributionSignIn(w http.ResponseWriter, r *http.Request, back, why str
 	_ = webLoginPage.Execute(w, struct {
 		Lang, Name, Message, Action, Back string
 		Words                             webLoginWords
-	}{lang, WebName, message, webSignInPath, localPath(back), words})
+		PWA                               template.HTML
+	}{lang, WebName, message, webSignInPath, localPath(back), words, template.HTML(webPWAHead)})
 }

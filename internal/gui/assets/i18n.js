@@ -4,6 +4,10 @@
 // works. {name} slots are filled by t(str, vars).
 const I18N = {
   zh: {
+    "Install app": "安装应用",
+    "Open the gateway over HTTPS to enable full app installation.": "通过 HTTPS 打开网关，以启用完整的应用安装功能。",
+    "In Safari, tap Share, then Add to Home Screen. Open the saved icon to use the gateway as an app.": "在 Safari 中点“分享”，再选“添加到主屏幕”。以后点桌面图标即可打开网关。",
+    "Open your browser menu and choose Install app or Add to Home screen. If already installed, open its icon.": "打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。如果已经安装，请从桌面图标打开。",
     "None": "无",
     "Prompt": "提示词",
     "Request hook": "请求 Hook",
@@ -3970,6 +3974,10 @@ const I18N = {
     "Where": "位置",
   },
   "zh-TW": {
+    "Install app": "安裝應用程式",
+    "Open the gateway over HTTPS to enable full app installation.": "請透過 HTTPS 開啟閘道，以啟用完整的應用程式安裝功能。",
+    "In Safari, tap Share, then Add to Home Screen. Open the saved icon to use the gateway as an app.": "在 Safari 中點選「分享」，再選「加入主畫面」。之後點選桌面圖示即可開啟閘道。",
+    "Open your browser menu and choose Install app or Add to Home screen. If already installed, open its icon.": "開啟瀏覽器選單，選擇「安裝應用程式」或「加入主畫面」。若已安裝，請從桌面圖示開啟。",
     "None": "無",
     "Prompt": "提示詞",
     "Request hook": "請求 Hook",
@@ -7921,6 +7929,10 @@ const I18N = {
     "Where": "位置",
   },
   ja: {
+    "Install app": "アプリをインストール",
+    "Open the gateway over HTTPS to enable full app installation.": "アプリのインストール機能を有効にするには、HTTPS でゲートウェイを開いてください。",
+    "In Safari, tap Share, then Add to Home Screen. Open the saved icon to use the gateway as an app.": "Safari の「共有」から「ホーム画面に追加」を選びます。追加したアイコンからゲートウェイをアプリとして開けます。",
+    "Open your browser menu and choose Install app or Add to Home screen. If already installed, open its icon.": "ブラウザのメニューから「アプリをインストール」または「ホーム画面に追加」を選びます。インストール済みの場合はアイコンから開いてください。",
     "None": "なし",
     "Prompt": "プロンプト",
     "Request hook": "リクエストフック",
@@ -11874,6 +11886,10 @@ const I18N = {
     "Where": "場所",
   },
   de: {
+    "Install app": "App installieren",
+    "Open the gateway over HTTPS to enable full app installation.": "Öffnen Sie das Gateway über HTTPS, um die vollständige App-Installation zu ermöglichen.",
+    "In Safari, tap Share, then Add to Home Screen. Open the saved icon to use the gateway as an app.": "Tippen Sie in Safari auf „Teilen“ und dann auf „Zum Home-Bildschirm“. Öffnen Sie das gespeicherte Symbol, um das Gateway als App zu nutzen.",
+    "Open your browser menu and choose Install app or Add to Home screen. If already installed, open its icon.": "Öffnen Sie das Browsermenü und wählen Sie „App installieren“ oder „Zum Startbildschirm hinzufügen“. Falls bereits installiert, öffnen Sie das App-Symbol.",
     "None": "Keine",
     "Prompt": "Prompt",
     "Request hook": "Anfrage-Hook",

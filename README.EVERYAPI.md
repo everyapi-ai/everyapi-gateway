@@ -36,6 +36,16 @@ go build -tags nogui -trimpath -ldflags '-s -w -X main.version=everyapi-web-0.1.
 
 Keep the data directory outside your source checkout in production. With no `--data-dir`, it is `everyapi-web` under the operating system's user configuration directory. The process gives itself an isolated home under that directory and clears inherited agent configuration paths. It disables subscription discovery, upstream automatic binary updates and usage telemetry. It does not alter the operator's live Claude Code, Codex or other agent configurations. Update this distribution by rebuilding or replacing its image/binary.
 
+## iPhone and PWA
+
+The standalone console includes a Web App Manifest, EveryAPI home-screen icons, standalone display mode and a service worker. Open the deployed HTTPS origin in Safari, sign in, then use Share → Add to Home Screen. Open the saved icon afterward; its first launch may ask you to sign in again because the installed app can have separate browser storage. The header's Install app button explains the Safari steps; browsers offering an installation prompt use that prompt. Pinch zoom remains available, inputs use phone-friendly text sizes, and the layout handles narrow screens, landscape and safe-area insets.
+
+Set `EVERYAPI_PUBLIC_URL` to the reachable HTTPS origin, for example `https://gateway.everyapi.ai`. A phone cannot reach the server through `127.0.0.1`; a plain HTTP LAN address is suitable for an online layout preview but does not enable secure-context features such as the service worker. Use a certificate trusted by the phone and proxy the origin at `/`, including `/pwa/*`, `/api/*` and the client API routes. See [MDN's installation requirements](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable) and [WebKit's home-screen app behavior](https://webkit.org/blog/17333/webkit-features-in-safari-26-0/).
+
+Offline mode stores only a public, credential-free reconnect page. Management pages, settings, request history, API responses and keys are not put into Cache Storage. Calls and console operations still need the gateway online. The launch URL is `/`, never a key-bearing sign-in link. Only the manifest, icons, worker and reconnect page are readable without a sign-in cookie; management APIs retain authentication.
+
+`MOBILE_PWA=1 node scripts/everyapi-web-smoke.cjs dist/everyapi-web` adds real-worker mobile acceptance to the normal disposable-server smoke. It checks Chinese and English at 320, 375, 390, 430 and 768 pixels wide plus landscape, touch navigation, provider save/discovery, login expiry with a controlling worker, Cache Storage contents and a real interrupted local connection followed by reconnect. Run it with Chromium and with `BROWSER=webkit`; browser emulation does not establish a successful installation on a physical iPhone.
+
 ## Connect a client
 
 List available model IDs with the client gateway key. Use the exact returned ID; an EveryAPI model normally appears as `everyapi/<upstream-model-id>` and a routing group as `group/<group-id>`.
