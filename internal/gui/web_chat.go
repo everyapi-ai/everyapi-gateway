@@ -62,7 +62,7 @@ func webChatPage(w http.ResponseWriter, r *http.Request) {
 var webChatTemplate = template.Must(template.New("everyapi-chat").Parse(`<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-{{.PWA}}<meta name="color-scheme" content="light dark"><title>{{.Name}} · Chat</title>
+{{.PWA}}<link rel="stylesheet" href="/pwa/app.css"><script src="/pwa/app.js" defer></script><meta name="color-scheme" content="light dark"><title>{{.Name}} · Chat</title>
 <style>
 :root{color-scheme:light dark;--bg:#f5f6f8;--panel:#fff;--text:#17181a;--muted:#69707a;--line:#dfe3e8;--accent:#1e5eff;--user:#e8efff;--assistant:#f1f3f5;--danger:#c62828}
 *{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{min-height:100dvh;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
@@ -72,7 +72,7 @@ main{width:min(920px,100%);flex:1;display:flex;flex-direction:column;margin:0 au
 @media(min-width:700px){header{padding-left:24px;padding-right:24px}.messages{padding-left:24px;padding-right:24px}.composer-wrap{padding-left:24px;padding-right:24px}}
 @media(prefers-color-scheme:dark){:root{--bg:#17181b;--panel:#222428;--text:#f2f3f5;--muted:#a8afb9;--line:#3a3e46;--user:#263b68;--assistant:#2a2d33}.error .bubble{background:#442328}.status{background:#f4f4f4;color:#17181a}}
 </style></head><body>
-<header><h1>EveryAPI</h1><select id="model" aria-label="模型" disabled><option>加载模型…</option></select><a class="settings" href="/settings">设置</a><button class="icon" id="clear" title="清空对话" aria-label="清空对话">⌫</button></header>
+<header><h1>EveryAPI</h1><select id="model" aria-label="模型" disabled><option>加载模型…</option></select><div class="actions" data-pwa-actions></div><a class="settings" href="/settings">设置</a><button class="icon" id="clear" title="清空对话" aria-label="清空对话">⌫</button></header>
 <main><section id="messages" class="messages" aria-live="polite"><div id="empty" class="empty"><h2>和 EveryAPI 聊聊</h2><p>选择模型后，在下方输入消息。</p></div></section></main>
 <div id="status" class="status hidden" role="status"></div>
 <div class="composer-wrap"><form id="composer" class="composer"><textarea id="input" rows="1" maxlength="20000" placeholder="输入消息…" aria-label="消息"></textarea><button id="send" class="send" type="submit" aria-label="发送">➤</button><button id="stop" class="send stop" type="button" aria-label="停止生成">■</button></form></div>
