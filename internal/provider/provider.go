@@ -660,17 +660,7 @@ var AllBuilt atomic.Int64
 func allProviders() []Provider {
 	AllBuilt.Add(1)
 	f := load()
-	stored := f.Providers
-	picks := map[string]Provider{}
-	var out []Provider
-	for _, p := range stored {
-		p = normalize(p)
-		if !hasEndpoint(p) {
-			picks[p.ID] = p
-			continue
-		}
-		out = append(out, p)
-	}
+	out, picks := ownOf(f)
 	for _, a := range Accounts() {
 		if _, taken := find(out, a.ID); taken || picks[a.ID].Hidden {
 			continue
@@ -685,6 +675,21 @@ func allProviders() []Provider {
 		out = append(out, a)
 	}
 	return ordered(out, f.Order)
+}
+
+// ownOf is f's providers of the user's own, and the model picks it keeps
+// for the signed-in accounts by id.
+func ownOf(f file) (own []Provider, picks map[string]Provider) {
+	picks = map[string]Provider{}
+	for _, p := range f.Providers {
+		p = normalize(p)
+		if !hasEndpoint(p) {
+			picks[p.ID] = p
+			continue
+		}
+		own = append(own, p)
+	}
+	return own, picks
 }
 
 // withPicks is the signed-in account a with what the user set on its

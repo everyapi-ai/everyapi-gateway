@@ -266,7 +266,7 @@ func readCalls(f file) *callFile {
 	old, generation := callCache[f.path], callGeneration
 	callsMu.Unlock()
 	if old == nil {
-		old = restoreCallContinuation(loadCalls(f))
+		old = loadKept(f)
 	}
 	if old != nil && old.Size == f.size && old.Mod == f.mod.UnixNano() {
 		callsMu.Lock()
@@ -399,7 +399,7 @@ func callsAlong(f file) *callsRide {
 	old, generation := callCache[f.path], callGeneration
 	callsMu.Unlock()
 	if old == nil {
-		old = restoreCallContinuation(loadCalls(f))
+		old = loadKept(f)
 	}
 	if old != nil && old.Size == f.size && old.Mod == f.mod.UnixNano() {
 		lock.Unlock()
@@ -460,7 +460,22 @@ type callFrame struct {
 	State   callDiskState
 	Strings []string
 	Patches []callPatch
+	// More: the frames after it, up to one without More, are one write's
+	// (framePatches); a file ending in one was cut off mid-write
+	More bool
+	// Calls is how many calls the file holds after this write's frames,
+	// to make room for them all at the first
+	Calls int
 }
+
+// framePatches is the most patches one frame holds. A write was one frame
+// whatever its size, and a frame is decoded whole: a Codex session of 52k
+// calls was one 8 MB frame, and reading it allocated ~100 MB and held ~70 MB
+// at once (24 MB of patches beside the calls made of them), the largest
+// part of the peak a start after an update reached in rebuilding the
+// Requests cache (#3493). A write is cut into frames of this many, read one
+// after another into the same buffers.
+const framePatches = 2048
 
 // Disk state contains only scalar continuation metadata. Even a nil runtime
 // index makes gob emit its recursive type descriptors in every append frame.
@@ -552,6 +567,7 @@ func loadCalls(f file) *callFile {
 	}()
 	var st *callFile
 	var calls []Call
+	var big, more bool
 	msgs := map[string]int{}
 	began := map[string]time.Time{}
 	for {
@@ -583,10 +599,13 @@ func loadCalls(f file) *callFile {
 		if st != nil && frame.State.Off < st.Off {
 			return nil
 		}
-		// a frame's patches are mostly new calls: room for them at once,
-		// rather than append's doublings, which a warm start paid ~500 MB
-		// for across every cached file
-		calls = slices.Grow(calls, len(frame.Patches))
+		big = big || len(frame.Patches) > framePatches
+		more = frame.More
+		// room for the write's calls at once (its frames' Calls; an older
+		// frame's patches, mostly new calls), rather than append's
+		// doublings, which a warm start paid ~500 MB for across every
+		// cached file
+		calls = slices.Grow(calls, max(len(frame.Patches), frame.Calls-len(calls)))
 		for _, p := range frame.Patches {
 			if p.Index < 0 || p.Index > len(calls) {
 				return nil
@@ -612,17 +631,58 @@ func loadCalls(f file) *callFile {
 		}
 		st = frame.State.restore()
 	}
-	if st == nil {
+	if st == nil || more {
 		return nil
 	}
 	st.Calls, st.Msgs, st.Began = calls, msgs, began
+	st.bigFrame = big
+	return st
+}
+
+// loadKept is the calls kept on disk for f, under f's callLock. A file
+// written as one frame larger than framePatches, before frames were cut,
+// is written again in frames, once.
+func loadKept(f file) *callFile {
+	st := restoreCallContinuation(loadCalls(f))
+	if st != nil && st.bigFrame {
+		st.bigFrame = false
+		writeCalls(st, 0, false)
+	}
 	return st
 }
 
 func writeCalls(st *callFile, start int, appendOnly bool) {
-	frame := callFrame{State: diskCallState(st), Strings: []string{""}}
-	dict := map[string]uint32{"": 0}
+	state := diskCallState(st)
+	var data bytes.Buffer
+	var frame callFrame
+	var dict map[string]uint32
+	var header [8]byte
+	ok := true
+	// flush adds the frame to data, its header in front
+	flush := func(more bool) {
+		frame.More = more
+		at := data.Len()
+		data.Write(header[:])
+		if gob.NewEncoder(&data).Encode(frame) != nil {
+			ok = false
+			return
+		}
+		b := data.Bytes()
+		binary.LittleEndian.PutUint32(b[at:], uint32(len(b)-at-len(header)))
+		binary.LittleEndian.PutUint32(b[at+4:], crc32.ChecksumIEEE(b[at+len(header):]))
+	}
+	begin := func() {
+		frame = callFrame{State: state, Strings: []string{""}, Calls: len(st.Calls)}
+		dict = map[string]uint32{"": 0}
+	}
+	begin()
 	add := func(i int) {
+		if len(frame.Patches) == framePatches {
+			if flush(true); !ok {
+				return
+			}
+			begin()
+		}
 		p := callPatch{Index: i, Call: st.Calls[i], Began: st.Began[st.Calls[i].Msg]}
 		p.Call.File = ""
 		for j, field := range callText(&p.Call) {
@@ -645,13 +705,9 @@ func writeCalls(st *callFile, start int, appendOnly bool) {
 	for i := start; i < len(st.Calls); i++ {
 		add(i)
 	}
-	var data bytes.Buffer
-	if gob.NewEncoder(&data).Encode(frame) != nil {
+	if flush(false); !ok {
 		return
 	}
-	var header [8]byte
-	binary.LittleEndian.PutUint32(header[:4], uint32(data.Len()))
-	binary.LittleEndian.PutUint32(header[4:], crc32.ChecksumIEEE(data.Bytes()))
 	dir := callCacheDir()
 	if os.MkdirAll(dir, 0700) != nil {
 		return
@@ -669,10 +725,7 @@ func writeCalls(st *callFile, start int, appendOnly bool) {
 	if !appendOnly {
 		defer os.Remove(out.Name())
 	}
-	_, err = out.Write(header[:])
-	if err == nil {
-		_, err = out.Write(data.Bytes())
-	}
+	_, err = out.Write(data.Bytes())
 	if closeErr := out.Close(); err == nil {
 		err = closeErr
 	}

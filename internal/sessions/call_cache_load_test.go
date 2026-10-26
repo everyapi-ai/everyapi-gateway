@@ -1,8 +1,14 @@
 package sessions
 
 import (
+	"bytes"
+	"encoding/binary"
+	"encoding/gob"
 	"fmt"
+	"hash/crc32"
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -76,4 +82,105 @@ func TestLoadedCallsKeepNothingOfTheLastShard(t *testing.T) {
 			t.Fatalf("began %v kept from the last shard", b)
 		}
 	}
+}
+
+// A write is cut into frames of framePatches, read back as one (#3493); a
+// file cut off after one of them is no file, as a torn frame is; and a
+// file written as one large frame before is read whole and written again
+// in frames.
+func TestCallsWrittenInFrames(t *testing.T) {
+	d := setupCalls(t)
+	path := filepath.Join(d.claude, "projects", "p", "s.jsonl")
+	st := &callFile{Path: path, Agent: "claude", Off: 77, Began: map[string]time.Time{}}
+	n := 2*framePatches + 100
+	for i := range n {
+		msg := fmt.Sprint("msg", i)
+		st.Calls = append(st.Calls, Call{Time: time.Unix(int64(i), 0), Agent: "claude", Session: "s", Model: fmt.Sprint("m", i%3), Msg: msg})
+		st.Began[msg] = time.Unix(int64(i)-1, 0)
+	}
+	frames := func() (sizes []int) {
+		b, err := os.ReadFile(callCachePath(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for len(b) >= 8 {
+			size := int(binary.LittleEndian.Uint32(b))
+			var f callFrame
+			if decodeFrame(b[8:8+size], &f) != nil {
+				t.Fatal("a frame doesn't decode")
+			}
+			sizes = append(sizes, len(f.Patches))
+			b = b[8+size:]
+		}
+		return sizes
+	}
+	check := func(what string) {
+		t.Helper()
+		got := loadKept(file{path: path, agent: "claude"})
+		if got == nil || len(got.Calls) != n || got.Off != 77 {
+			t.Fatalf("%s: not read back", what)
+		}
+		for i, c := range got.Calls {
+			if c.Msg != fmt.Sprint("msg", i) || c.Model != fmt.Sprint("m", i%3) || !c.Time.Equal(time.Unix(int64(i), 0)) || c.File != path {
+				t.Fatalf("%s: call %d is %+v", what, i, c)
+			}
+		}
+		if !got.Began["msg4000"].Equal(time.Unix(3999, 0)) || got.Msgs["msg4000"] != 4000 {
+			t.Fatalf("%s: messages not read back", what)
+		}
+		if cap(got.Calls)-len(got.Calls) > len(got.Calls)/100 {
+			t.Fatalf("%s: %d calls read into a slice of %d", what, n, cap(got.Calls))
+		}
+	}
+	writeCalls(st, 0, false)
+	if got := frames(); !slices.Equal(got, []int{framePatches, framePatches, 100}) {
+		t.Fatalf("frames of %v patches", got)
+	}
+	check("cut")
+
+	// cut off after the first frame
+	b, _ := os.ReadFile(callCachePath(path))
+	first := 8 + int(binary.LittleEndian.Uint32(b))
+	if err := os.WriteFile(callCachePath(path), b[:first], 0600); err != nil {
+		t.Fatal(err)
+	}
+	if loadCalls(file{path: path, agent: "claude"}) != nil {
+		t.Fatal("a file cut off mid-write read as whole")
+	}
+
+	// as written before frames were cut: one frame of every patch
+	old := callFrame{State: diskCallState(st), Strings: []string{""}}
+	dict := map[string]uint32{"": 0}
+	for i := range st.Calls {
+		p := callPatch{Index: i, Call: st.Calls[i], Began: st.Began[st.Calls[i].Msg]}
+		for j, field := range callText(&p.Call) {
+			id, ok := dict[*field]
+			if !ok {
+				id = uint32(len(old.Strings))
+				dict[*field] = id
+				old.Strings = append(old.Strings, *field)
+			}
+			p.Text[j] = id
+			*field = ""
+		}
+		old.Patches = append(old.Patches, p)
+	}
+	var data bytes.Buffer
+	if err := gob.NewEncoder(&data).Encode(old); err != nil {
+		t.Fatal(err)
+	}
+	var header [8]byte
+	binary.LittleEndian.PutUint32(header[:4], uint32(data.Len()))
+	binary.LittleEndian.PutUint32(header[4:], crc32.ChecksumIEEE(data.Bytes()))
+	if err := os.WriteFile(callCachePath(path), append(header[:], data.Bytes()...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := frames(); !slices.Equal(got, []int{n}) {
+		t.Fatalf("old file: frames of %v patches", got)
+	}
+	check("one large frame")
+	if got := frames(); !slices.Equal(got, []int{framePatches, framePatches, 100}) {
+		t.Fatalf("one large frame written again as frames of %v patches", got)
+	}
+	check("written again")
 }

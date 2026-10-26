@@ -101,3 +101,61 @@ func TestCJKSecretNamesMasked(t *testing.T) {
 		}
 	}
 }
+
+// A key of digits only after its name and 为, 是, ：, : or = is masked:
+// "密钥为12231241" came back "nothing to mask" in the try box (CyberCaius
+// on Discord). It takes six digits or more, and a number that counts
+// something (2048 位, 300000 毫秒) is left. The names added with it (PIN码,
+// 安全码, 授权码, 暗証番号, 비번, pin) are masked too.
+func TestCJKDigitKeysMasked(t *testing.T) {
+	cases := []struct{ in, gone, kept string }{
+		{"密钥为12231241", "12231241", "密钥为"},
+		{"密钥是 12231241，记一下", "12231241", "密钥是 "},
+		{"密钥：12231241", "12231241", "密钥："},
+		{"秘钥=12231241", "12231241", "秘钥="},
+		{"令牌为「20261025」", "20261025", "令牌为「"},
+		{"金鑰為 12231241。", "12231241", "金鑰為 "},
+		{"トークンは 12231241", "12231241", "トークンは "},
+		{"토큰: 12231241", "12231241", "토큰: "},
+		{"token 为 12231241", "12231241", "token 为 "},
+		{"apikey：12231241", "12231241", "apikey："},
+		{"API Key 是 9988776655", "9988776655", "API Key 是 "},
+		{"secret 為 123456", "123456", "secret 為 "},
+		{"pin 为 123456", "123456", "pin 为 "},
+		{"PIN码：1234", "1234", "PIN码："},
+		{"pin码是 8520", "8520", "pin码是 "},
+		{"信用卡安全码：8765", "8765", "安全码："},
+		{"邮箱授权码为 abcdefghijklmnop", "abcdefghijklmnop", "授权码为 "},
+		{"暗証番号は 4321", "4321", "暗証番号は "},
+		{"비번: 1q2w3e4r", "1q2w3e4r", "비번: "},
+		// the password names took digits only already
+		{"密码为12231241", "12231241", "密码为"},
+		{"口令：12231241", "12231241", "口令："},
+	}
+	for _, c := range cases {
+		out, n := Mask(c.in, Options{Secrets: true})
+		if n != 1 || strings.Contains(unmarked(out), c.gone) || !strings.Contains(out, c.kept) {
+			t.Errorf("%q: %d masked → %q", c.in, n, out)
+		}
+		if back := Restore(out, false); back != c.in {
+			t.Errorf("round trip: %q → %q → %q", c.in, out, back)
+		}
+	}
+	body := `{"messages":[{"role":"user","content":"密钥为12231241"}]}`
+	if out, n := MaskJSON([]byte(body), Options{Secrets: true}); n != 1 || strings.Contains(string(out), "12231241") || string(RestoreJSON(out)) != body {
+		t.Errorf("body: %d %s", n, out)
+	}
+	// a number that is no key (each one masked nowhere above, as a value
+	// masked once is masked wherever it is again): too short, a size, a time, a count, no
+	// 为/是/： between the name and it, code
+	for _, in := range []string{
+		"RSA 密钥为 2048 位", "密钥为 12345", "令牌有效期是 86400", "令牌是 300000 毫秒",
+		"密钥长度为 4096000 位", "token 是 3600000 ms", "key 是 1048576 byte", "令牌桶容量为 100000",
+		"密钥 55661237", "spin 是 778812", "pin 为 1934",
+		"const token = 44102939;", `{"token": 44102939}`, "maxTokens: 128000",
+	} {
+		if out, n := Mask(in, Options{Secrets: true}); n != 0 {
+			t.Errorf("%q masked: %q", in, out)
+		}
+	}
+}
