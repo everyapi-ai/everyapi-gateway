@@ -11,6 +11,7 @@
 .everyapi-github-config strong, .everyapi-github-config-hint { grid-column: 1 / -1; }
 .everyapi-github-config strong { font-size: 13px; }
 .everyapi-github-config-hint { color: var(--muted); font-size: 12px; }
+.everyapi-github-config-link { grid-column: 1 / -1; color: var(--accent); font-size: 12px; }
 .everyapi-github-config-input { min-width: 0; height: 38px; border: 1px solid var(--line); border-radius: 8px; padding: 0 9px; background: var(--bg); color: var(--fg); font: inherit; }
 .everyapi-github-config-save { height: 38px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
 .everyapi-github-config-save:disabled { opacity: .5; }

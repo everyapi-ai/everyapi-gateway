@@ -254,6 +254,8 @@ magpie.plugin("sessions", (ctx) => {
     oauthForm.hidden = true;
     const oauthTitle = el("strong", "", "配置 GitHub OAuth App");
     const oauthHint = el("span", "everyapi-github-config-hint", "回调地址必须是 https://gateway.everyapi.ai/_github/callback");
+    const oauthCreate = el("a", "everyapi-github-config-link", "在 GitHub 创建 OAuth App");
+    oauthCreate.href = "https://github.com/settings/applications/new"; oauthCreate.target = "_blank"; oauthCreate.rel = "noopener noreferrer";
     const oauthID = el("input", "everyapi-github-config-input");
     oauthID.type = "text"; oauthID.required = true; oauthID.autocomplete = "off"; oauthID.placeholder = "Client ID"; oauthID.setAttribute("aria-label", "GitHub Client ID");
     const oauthSecret = el("input", "everyapi-github-config-input");
@@ -262,7 +264,7 @@ magpie.plugin("sessions", (ctx) => {
     oauthOrg.type = "text"; oauthOrg.required = true; oauthOrg.autocomplete = "organization"; oauthOrg.value = "everyapi-ai"; oauthOrg.placeholder = "GitHub 组织名"; oauthOrg.setAttribute("aria-label", "GitHub 组织名");
     const oauthSave = el("button", "everyapi-github-config-save", "保存并继续");
     oauthSave.type = "submit";
-    oauthForm.append(oauthTitle, oauthHint, oauthID, oauthSecret, oauthOrg, oauthSave);
+    oauthForm.append(oauthTitle, oauthHint, oauthCreate, oauthID, oauthSecret, oauthOrg, oauthSave);
     const projectStatus = el("p", "everyapi-project-status", "授权 GitHub 后选择项目，网关会在工作区中修改代码。");
     const messages = el("div", "everyapi-chat-messages");
     const empty = el("div", "everyapi-chat-empty", "选择模型后，在下方输入消息。");
