@@ -241,7 +241,6 @@ magpie.plugin("sessions", (ctx) => {
     const model = el("select", "everyapi-chat-model");
     model.disabled = true;
     model.append(new Option("加载模型…", ""));
-    title.append(model);
     const projectRow = el("div", "everyapi-project-row");
     const project = el("select", "everyapi-project-select");
     project.append(new Option("加载 GitHub 项目…", ""));
@@ -259,7 +258,7 @@ magpie.plugin("sessions", (ctx) => {
     input.rows = 1; input.maxLength = 20000; input.placeholder = "描述要修改的代码…"; input.setAttribute("aria-label", "代码修改要求");
     const send = el("button", "everyapi-chat-send", "修改");
     send.type = "submit"; send.setAttribute("aria-label", "发送");
-    form.append(input, send);
+    form.append(model, input, send);
     page.append(title, projectRow, projectStatus, messages, form);
     let controller = null, selectedRepo = "", lastPrompt = "", lastResult = null;
     const repoRefs = new Map();
