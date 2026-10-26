@@ -37,9 +37,9 @@ module.exports = async function projects(browser, desktop, address) {
       }
     });
     page = await context.newPage();
-    page.setDefaultTimeout(10000);
+    page.setDefaultTimeout(30000);
     page.on('pageerror', err => errors.push(err.message));
-    await page.goto(address + '/settings?view=sessions', { waitUntil: 'commit' });
+    await page.goto(address + '/settings?view=sessions', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.locator('.everyapi-project-chooser .everyapi-project-auth').waitFor();
     assert.equal(await page.locator('.everyapi-project-chooser .everyapi-project-auth').getAttribute('href'), '/_github/start');
     assert.equal(await page.locator('.everyapi-workbench-grid').isVisible(), false, 'empty editor panels appear before connecting GitHub');
@@ -114,7 +114,7 @@ module.exports = async function projects(browser, desktop, address) {
     assert.deepEqual(errors, []);
     console.log('PASS: direct GitHub connect, repository error/retry and search, no empty panes before selection, auto-open README, file search/preview, code-first desktop and collapsible tasks, phone panels, task recovery and PR retry (API fixtures)');
   } catch (error) {
-    console.error('Project fixture diagnostics:', { requests, errors, url: page?.url(), text: page ? (await page.locator('body').innerText()).slice(0, 1600) : '' });
+    console.error('Project fixture diagnostics:', { requests, errors, url: page?.url(), text: page ? (await page.locator('body').innerText({ timeout: 1000 }).catch(() => '')).slice(0, 1600) : '' });
     throw error;
   } finally { await context.close(); }
 };

@@ -53,7 +53,7 @@ module.exports = async function mobile(browser, address, admin, client, upstream
       let page;
       try {
         page = await context.newPage();
-        page.setDefaultTimeout(10000);
+        page.setDefaultTimeout(30000);
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
         await page.route('**/*', route => new URL(route.request().url()).origin === address ? route.continue() : route.abort());

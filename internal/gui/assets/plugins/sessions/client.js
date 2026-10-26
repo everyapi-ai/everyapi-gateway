@@ -425,11 +425,9 @@ magpie.plugin("sessions", (ctx) => {
     };
     const errorText = async (res) => { const text = await res.text(); try { const x = JSON.parse(text); return x?.error?.message || x?.error || text || res.statusText; } catch { return text || res.statusText; } };
     const request = async (url, options = {}, timeout = 20000) => {
-      const timeoutController = new AbortController();
-      const timer = setTimeout(() => timeoutController.abort(), timeout);
-      try { return await fetch(url, { ...options, signal: options.signal ? AbortSignal.any([options.signal, timeoutController.signal]) : timeoutController.signal }); }
-      catch (err) { if (timeoutController.signal.aborted) throw new Error(t("The request timed out. Reload to retry; the workspace and changes are retained.")); throw err; }
-      finally { clearTimeout(timer); }
+      const timeoutSignal = AbortSignal.timeout(timeout);
+      try { return await fetch(url, { ...options, signal: options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal }); }
+      catch (err) { if (timeoutSignal.aborted) throw new Error(t("The request timed out. Reload to retry; the workspace and changes are retained.")); throw err; }
     };
     request("/api/chat/models", { headers: { Accept: "application/json" } }).then(async (res) => {
       if (!res.ok) throw new Error(await errorText(res));
