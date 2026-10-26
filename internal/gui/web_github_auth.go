@@ -31,16 +31,35 @@ type githubAuthConfig struct {
 }
 
 func loadWebGitHubConfig() githubAuthConfig {
-	secret := strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_SECRET"))
+	secret := strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_OAUTH_CLIENT_SECRET"))
 	if secret == "" {
-		if path := strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_SECRET_FILE")); path != "" {
-			if b, err := os.ReadFile(path); err == nil {
-				secret = strings.TrimSpace(string(b))
+		secret = strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_SECRET"))
+	}
+	if secret == "" {
+		paths := []string{
+			strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_OAUTH_CLIENT_SECRET_FILE")),
+			strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_SECRET_FILE")),
+		}
+		for _, path := range paths {
+			if path == "" {
+				continue
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			secret = strings.TrimSpace(string(b))
+			if secret != "" {
+				break
 			}
 		}
 	}
+	clientID := strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_OAUTH_CLIENT_ID"))
+	if clientID == "" {
+		clientID = strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_ID"))
+	}
 	return githubAuthConfig{
-		ClientID:     strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_ID")),
+		ClientID:     clientID,
 		ClientSecret: secret,
 		Organization: strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_ORG")),
 	}
@@ -95,6 +114,9 @@ func randomWebGitHubState() (string, error) {
 }
 
 func githubCallbackURL(r *http.Request) string {
+	if configured := strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_REDIRECT_URI")); configured != "" {
+		return configured
+	}
 	if public := strings.TrimRight(os.Getenv("EVERYAPI_PUBLIC_URL"), "/"); public != "" {
 		return public + githubCallbackPath
 	}
