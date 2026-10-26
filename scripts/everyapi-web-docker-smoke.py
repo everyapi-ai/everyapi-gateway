@@ -97,6 +97,7 @@ def main():
         docker("run", "-d", "--init", "--name", NAME,
                "--read-only", "--tmpfs", "/tmp:size=256m,mode=1777",
                "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+               "--add-host", "host.docker.internal:host-gateway",
                "-p", f"127.0.0.1:{port}:8080", "-v", NAME + ":/var/lib/everyapi-web",
                "-e", "EVERYAPI_API_BASE=" + upstream,
                "-e", "EVERYAPI_PUBLIC_URL=" + base,
