@@ -176,7 +176,7 @@ body.window .row.sm-sub-row { min-height: 42px; padding-left: calc(14px + var(--
 .everyapi-project-chooser { flex: 1; min-height: 0; width: min(880px, 100%); margin: 0 auto; padding: clamp(24px, 6vh, 64px) 32px 24px; overflow: auto; }
 .everyapi-chooser-header h1 { margin: 0 0 12px; font-size: 28px; font-weight: 650; letter-spacing: -.03em; }
 .everyapi-chooser-header p { margin: 0; color: var(--muted); line-height: 1.7; font-size: 14px; }
-.everyapi-chooser-actions { display: flex; gap: 14px; align-items: center; margin: 28px 0 18px; }
+.everyapi-chooser-actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 28px 0 18px; }
 .everyapi-connection-status { min-width: 0; flex: 1; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .everyapi-repo-retry, .everyapi-repo-back { border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; background: var(--card); color: var(--fg); }
 .everyapi-repo-search { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; background: var(--card); color: var(--fg); font: inherit; margin-bottom: 18px; }

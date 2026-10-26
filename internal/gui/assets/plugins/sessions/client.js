@@ -287,9 +287,11 @@ magpie.plugin("sessions", (ctx) => {
     retry.type = "button";
     const back = el("button", "everyapi-repo-back", t("Return to current project"));
     back.type = "button"; back.hidden = true;
+    const disconnect = el("button", "everyapi-repo-disconnect everyapi-repo-back", t("Disconnect GitHub"));
+    disconnect.type = "button"; disconnect.hidden = true;
     chooserHeader.append(chooserTitle, chooserHint);
     const chooserActions = el("div", "everyapi-chooser-actions");
-    chooserActions.append(connectionStatus, retry, back);
+    chooserActions.append(connectionStatus, retry, back, disconnect);
     const repoSearch = el("input", "everyapi-repo-search");
     repoSearch.type = "search"; repoSearch.placeholder = t("Search repository names…"); repoSearch.setAttribute("aria-label", t("Search GitHub repositories")); repoSearch.hidden = true;
     const repoList = el("div", "everyapi-repo-list");
@@ -528,7 +530,7 @@ magpie.plugin("sessions", (ctx) => {
     const loadRepos = async () => {
       if (loadingRepos) return;
       const currentLoad = ++repoLoad;
-      loadingRepos = true; retry.disabled = true; repoSearch.hidden = true; auth.hidden = true;
+      loadingRepos = true; retry.disabled = true; repoSearch.hidden = true; auth.hidden = true; disconnect.hidden = true;
       connectionStatus.textContent = t("Checking GitHub connection…");
       repoList.replaceChildren();
       try {
@@ -542,6 +544,22 @@ magpie.plugin("sessions", (ctx) => {
         oauthForm.hidden = !!config.configured;
         oauthEdit.hidden = !config.configured || !!config.managed;
         if (!config.configured) { connectionStatus.textContent = t("GitHub is not configured"); projectStatus.textContent = t("Configure the GitHub OAuth App to continue."); return; }
+        const restoreWorkspace = async () => {
+          if (selectedRepo) return;
+          const current = await request("/api/github/workspace", { headers: { Accept: "application/json" } });
+          if (current.status === 401) return;
+          if (!current.ok) throw new Error(await errorText(current));
+          const workspace = await current.json();
+          if (currentLoad !== repoLoad || !workspace.selected) return;
+          openWorkspace(workspace);
+          lastPrompt = workspace.prompt || "";
+          if (lastPrompt) bubble("user", lastPrompt);
+          if (workspace.running) waitForAgent().catch(err => { projectStatus.textContent = err.message; });
+          else if (workspace.result) showResult(workspace.result, workspace.error, !!workspace.pull_request);
+          if (workspace.pull_request?.html_url) showPullRequest(workspace.pull_request.html_url);
+        };
+        // Resume the local checkout before waiting for GitHub's repository list.
+        if (config.connected) { disconnect.hidden = false; await restoreWorkspace(); }
         connectionStatus.textContent = t("Loading GitHub repositories…");
         const res = await request("/api/github/repos", { headers: { Accept: "application/json" } });
         if (res.status === 401) {
@@ -549,34 +567,31 @@ magpie.plugin("sessions", (ctx) => {
           connectionStatus.textContent = t("GitHub not connected"); auth.textContent = t("Connect GitHub"); auth.hidden = false;
           chooserHint.textContent = t("Authorize GitHub to browse repositories, inspect code, and prepare changes with the assistant.");
           projectStatus.textContent = t("Connect GitHub to open a project.");
+          disconnect.hidden = true; showChooser(true); back.hidden = true;
           return;
         }
         if (!res.ok) throw new Error(await errorText(res));
         const out = await res.json();
+        disconnect.hidden = false;
         repositories = out.repos || []; repoRefs.clear();
         repositories.forEach((repo) => repoRefs.set(repo.full_name, repo.default_branch || "main"));
         chooserTitle.textContent = t("Open a project");
         chooserHint.textContent = t("Choose a repository. Changes stay in the workspace until you review them and create a Pull Request.");
         connectionStatus.textContent = `${out.user ? "@" + out.user + " · " : ""}${t("{n} writable repositories", { n: repositories.length })}`;
         repoSearch.hidden = false; renderRepos();
-        if (!selectedRepo) {
-          const current = await request("/api/github/workspace", { headers: { Accept: "application/json" } });
-          if (!current.ok) throw new Error(await errorText(current));
-          const workspace = await current.json();
-          if (currentLoad !== repoLoad) return;
-          if (workspace.selected) {
-            openWorkspace(workspace);
-            lastPrompt = workspace.prompt || "";
-            if (lastPrompt) bubble("user", lastPrompt);
-            if (workspace.running) await waitForAgent();
-            else if (workspace.result) showResult(workspace.result, workspace.error, !!workspace.pull_request);
-            if (workspace.pull_request?.html_url) showPullRequest(workspace.pull_request.html_url);
-          }
-        }
+        await restoreWorkspace();
       } catch (err) { connectionStatus.textContent = t("GitHub repositories could not be loaded"); repoList.append(el("p", "everyapi-repo-error", err.message)); projectStatus.textContent = err.message; }
       finally { loadingRepos = false; retry.disabled = false; }
     };
     retry.onclick = loadRepos;
+    disconnect.onclick = async () => {
+      disconnect.disabled = true;
+      try {
+        const res = await request("/api/github/disconnect", { method: "POST" });
+        if (!res.ok) throw new Error(await errorText(res));
+        location.reload();
+      } catch (err) { projectStatus.textContent = err.message; disconnect.disabled = false; }
+    };
     loadRepos();
     model.onchange = () => { try { localStorage.setItem("everyapi.projectModel", model.value); } catch {} };
     oauthForm.onsubmit = async (event) => {

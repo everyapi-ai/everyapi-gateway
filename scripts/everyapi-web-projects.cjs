@@ -18,7 +18,8 @@ module.exports = async function projects(browser, desktop, address) {
       if (url.origin !== address) return route.abort();
       const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
       switch (url.pathname) {
-        case '/api/github/status': return json({ configured: true, managed: true, organization: 'everyapi-ai', callback_url: address + '/_github/callback' });
+        case '/api/github/status': return json({ connected: authorized, configured: true, managed: true, organization: 'everyapi-ai', callback_url: address + '/_github/callback' });
+        case '/api/github/disconnect': authorized = false; return json({ connected: false });
         case '/api/github/repos':
           if (!authorized) return json({ error: 'Authorization required' }, 401);
           if (failRepos) return json({ error: 'Repository service unavailable' }, 502);
@@ -111,6 +112,15 @@ module.exports = async function projects(browser, desktop, address) {
     assert(editor.width > 600, 'collapsing tasks did not give space back to the code');
     await page.locator('.everyapi-task-toggle').click();
     if (process.env.WORKBENCH_SCREENSHOTS) await page.screenshot({ path: 'dist/workbench-desktop.png', fullPage: true });
+    failRepos = true;
+    await page.reload();
+    await page.locator('.everyapi-code-tabs button').first().click();
+    await page.locator('.everyapi-file-content').filter({ hasText: '# Project documentation' }).waitFor();
+    assert.equal(clones, 1, 'repository outage lost or recloned the saved workspace');
+    await page.locator('.everyapi-project-select').click();
+    await page.locator('.everyapi-repo-disconnect').click();
+    await page.locator('.everyapi-project-chooser .everyapi-project-auth').waitFor();
+    assert.equal(authorized, false, 'disconnect did not clear the connection');
     assert.deepEqual(errors, []);
     console.log('PASS: direct GitHub connect, repository error/retry and search, no empty panes before selection, auto-open README, file search/preview, code-first desktop and collapsible tasks, phone panels, task recovery and PR retry (API fixtures)');
   } catch (error) {

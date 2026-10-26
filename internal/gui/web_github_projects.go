@@ -1,9 +1,8 @@
 package gui
 
-// GitHub project access for the EveryAPI web gateway. OAuth tokens stay in
-// memory only; a restart requires the user to authorize GitHub again. Repos
-// are cloned into the gateway's private data directory and all file paths are
-// checked before an agent can read or write them.
+// GitHub project access for the EveryAPI web gateway. OAuth sessions and
+// workspace metadata are encrypted in the private data directory so a restart
+// does not force another authorization.
 
 import (
 	"bytes"
@@ -34,13 +33,20 @@ import (
 
 type githubSession struct {
 	mu              sync.Mutex
+	id, binding     string
 	Token, Username string
+	RefreshToken    string
 	Expires         time.Time
+	TokenExpires    time.Time
+	RefreshExpires  time.Time
 	Workspace       *githubWorkspace
 	Running         bool
 	AgentError      string
 	Activity        []string
 	Cancel          context.CancelFunc
+	Invalid         bool
+	disconnected    bool
+	persistPending  bool
 }
 
 type githubWorkspace struct {
@@ -61,12 +67,15 @@ func githubSessionFor(r *http.Request) (*githubSession, bool) {
 	if err != nil || c.Value == "" {
 		return nil, false
 	}
-	v, ok := githubSessions.Load(c.Value)
-	s, ok := v.(*githubSession)
-	if !ok || s == nil || time.Now().After(s.Expires) {
-		if ok {
-			githubSessions.Delete(c.Value)
-		}
+	s, err := loadGitHubSession(c.Value)
+	if err != nil || s == nil {
+		githubSessions.Delete(c.Value)
+		return nil, false
+	}
+	s.mu.Lock()
+	invalid := s.Invalid || time.Now().After(s.Expires)
+	s.mu.Unlock()
+	if invalid {
 		return nil, false
 	}
 	return s, true
@@ -86,11 +95,13 @@ func githubProjectRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/github/agent", githubAgentStatusAPI)
 	mux.HandleFunc("DELETE /api/github/agent", githubCancelAgentAPI)
 	mux.HandleFunc("POST /api/github/pull-request", githubPullRequestAPI)
+	mux.HandleFunc("POST /api/github/disconnect", githubDisconnectAPI)
 }
 
 func githubStatusAPI(w http.ResponseWriter, r *http.Request) {
 	cfg := loadWebGitHubConfig()
-	writeJSON(w, map[string]any{"configured": cfg.enabled(), "organization": cfg.Organization, "callback_url": githubCallbackURL(r), "managed": strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_OAUTH_CLIENT_ID")) != "" || strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_ID")) != ""})
+	_, connected := githubSessionFor(r)
+	writeJSON(w, map[string]any{"connected": connected, "configured": cfg.enabled(), "organization": cfg.Organization, "callback_url": githubCallbackURL(r), "managed": strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_OAUTH_CLIENT_ID")) != "" || strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_ID")) != ""})
 }
 
 func githubConfigAPI(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +138,12 @@ func githubReposAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := refreshGitHubSessionLocked(ctx, s); err != nil {
+		githubSessionError(w, s, err, "GitHub 连接暂时不可用，请重试")
+		return
+	}
 	type repository struct {
 		FullName      string `json:"full_name"`
 		Name          string `json:"name"`
@@ -144,7 +161,7 @@ func githubReposAPI(w http.ResponseWriter, r *http.Request) {
 		var batch []repository
 		endpoint := fmt.Sprintf("https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner%%2Ccollaborator%%2Corganization_member&page=%d", page)
 		if err := githubJSON(ctx, s.Token, http.MethodGet, endpoint, nil, &batch); err != nil {
-			http.Error(w, "无法读取 GitHub 项目列表", http.StatusBadGateway)
+			githubSessionError(w, s, err, "无法读取 GitHub 项目列表")
 			return
 		}
 		for _, repo := range batch {
@@ -277,12 +294,20 @@ func githubSelectWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "无法创建项目工作区", http.StatusInternalServerError)
 		return
 	}
+	if err := refreshGitHubSessionLocked(r.Context(), s); err != nil {
+		githubSessionError(w, s, err, "GitHub 连接暂时不可用，请重试")
+		return
+	}
 	if err := gitClone(r.Context(), s.Token, "https://github.com/"+in.Repo+".git", in.Ref, base); err != nil {
 		_ = os.RemoveAll(base)
 		http.Error(w, "无法克隆 GitHub 项目: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	s.Workspace = &githubWorkspace{Repo: in.Repo, Ref: in.Ref, Path: base}
+	if err := saveGitHubSessionLocked(s); err != nil {
+		http.Error(w, "无法保存项目连接状态", http.StatusInternalServerError)
+		return
+	}
 	files, _ := workspaceFiles(base, 0)
 	writeJSON(w, map[string]any{"selected": true, "repo": in.Repo, "ref": in.Ref, "files": files})
 }
@@ -318,12 +343,19 @@ func githubAgentAPI(w http.ResponseWriter, r *http.Request) {
 	ws.LastPrompt, ws.LastResult = in.Prompt, nil
 	s.Running, s.AgentError = true, ""
 	s.Activity = []string{"任务已接受，等待模型分析…"}
+	if err := saveGitHubSessionLocked(s); err != nil {
+		s.Running = false
+		http.Error(w, "无法保存任务状态，请重试", 500)
+		return
+	}
+	taskWorkspace := *ws
+	taskWorkspace.History = append([]any(nil), ws.History...)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	s.Cancel = cancel
 	// A mobile browser can disconnect while the model works. Keep the bounded task on the server and expose its result through GET so a refresh resumes it.
 	go func() {
 		defer cancel()
-		result, err := runGitHubAgent(ctx, ws, in.Model, in.Prompt, func(message string) {
+		result, err := runGitHubAgent(ctx, &taskWorkspace, in.Model, in.Prompt, func(message string) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			s.Activity = append(s.Activity, message)
@@ -345,6 +377,10 @@ func githubAgentAPI(w http.ResponseWriter, r *http.Request) {
 			result = map[string]any{"message": "任务未完成，请检查已有修改后重试。", "files": changedFiles(reviewCtx, ws.Path), "diff": gitDiff(reviewCtx, ws.Path)}
 		}
 		ws.LastResult = result
+		ws.History = taskWorkspace.History
+		if err := saveGitHubSessionLocked(s); err != nil {
+			s.AgentError = "无法保存任务结果，刷新前请先检查已有修改。"
+		}
 	}()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
@@ -399,6 +435,10 @@ func githubPullRequestAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请先选择 GitHub 项目", http.StatusBadRequest)
 		return
 	}
+	if err := refreshGitHubSessionLocked(r.Context(), s); err != nil {
+		githubSessionError(w, s, err, "GitHub 连接暂时不可用，请重试")
+		return
+	}
 	var in struct {
 		Title string `json:"title"`
 		Body  string `json:"body"`
@@ -429,6 +469,10 @@ func githubPullRequestAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ws.Branch = branch
+		if err := saveGitHubSessionLocked(s); err != nil {
+			http.Error(w, "无法保存分支状态，请重试", 500)
+			return
+		}
 	}
 	if dirty && (gitRun(r.Context(), ws.Path, "config", "user.name", "EveryAPI Gateway") != nil || gitRun(r.Context(), ws.Path, "config", "user.email", "gateway@everyapi.ai") != nil || gitRun(r.Context(), ws.Path, "add", "--all") != nil || gitRun(r.Context(), ws.Path, "commit", "-m", in.Title) != nil) {
 		http.Error(w, "无法提交项目修改，可以重试", http.StatusBadGateway)
@@ -444,10 +488,14 @@ func githubPullRequestAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	pr, err := githubCreatePR(r.Context(), s.Token, ws.Repo, map[string]string{"title": in.Title, "body": in.Body, "head": ws.Branch, "base": ws.Ref})
 	if err != nil {
-		http.Error(w, "无法创建 Pull Request", http.StatusBadGateway)
+		githubSessionError(w, s, err, "无法创建 Pull Request")
 		return
 	}
 	ws.PullRequest = pr
+	if err := saveGitHubSessionLocked(s); err != nil {
+		http.Error(w, "无法保存 Pull Request 状态，请重试", 500)
+		return
+	}
 	writeJSON(w, pr)
 }
 
@@ -488,7 +536,7 @@ func githubJSON(ctx context.Context, token, method, endpoint string, body any, o
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
-		return fmt.Errorf("github returned %s: %s", res.Status, strings.TrimSpace(string(b)))
+		return &githubHTTPError{Status: res.StatusCode, Detail: fmt.Sprintf("%s: %s", res.Status, strings.TrimSpace(string(b)))}
 	}
 	return json.NewDecoder(io.LimitReader(res.Body, 4<<20)).Decode(out)
 }

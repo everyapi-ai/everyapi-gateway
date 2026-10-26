@@ -2,6 +2,7 @@
 // kernel adds them to i18n.js's (magpie.strings).
 magpie.strings({
   zh: {
+    "Disconnect GitHub": "断开 GitHub",
     "Project task completed": "任务已完成",
     "Project task failed": "任务未完成",
     "Project changes ({n})": "变更 {n}",
@@ -130,6 +131,7 @@ magpie.strings({
     "Searched what was said in the latest {n} of {total} sessions.": "已搜索最近 {n} 个会话的对话内容（共 {total} 个）。",
   },
   "zh-TW": {
+    "Disconnect GitHub": "中斷 GitHub 連線",
     "Project task completed": "任務已完成",
     "Project task failed": "任務未完成",
     "Project changes ({n})": "變更 {n}",
@@ -258,6 +260,7 @@ magpie.strings({
     "Searched what was said in the latest {n} of {total} sessions.": "已搜尋最近 {n} 個會話的對話內容（共 {total} 個）。",
   },
   ja: {
+    "Disconnect GitHub": "GitHub の接続を解除",
     "Project task completed": "タスク完了",
     "Project task failed": "タスク失敗",
     "Project changes ({n})": "変更 {n}",
@@ -386,6 +389,7 @@ magpie.strings({
     "Searched what was said in the latest {n} of {total} sessions.": "最新 {n} 件の会話の内容を検索しました（全 {total} 件）。",
   },
   de: {
+    "Disconnect GitHub": "GitHub trennen",
     "Project task completed": "Aufgabe abgeschlossen",
     "Project task failed": "Aufgabe fehlgeschlagen",
     "Project changes ({n})": "Änderungen ({n})",
