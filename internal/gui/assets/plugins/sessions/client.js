@@ -246,7 +246,7 @@ magpie.plugin("sessions", (ctx) => {
     const project = el("select", "everyapi-project-select");
     project.append(new Option("加载 GitHub 项目…", ""));
     const auth = el("a", "everyapi-project-auth", "授权 GitHub");
-    auth.href = "/_github/start"; auth.hidden = true;
+    auth.href = "/_github/start";
     const pr = el("button", "everyapi-project-pr", "创建 Pull Request");
     pr.type = "button"; pr.hidden = true;
     projectRow.append(project, auth, pr);
@@ -280,6 +280,7 @@ magpie.plugin("sessions", (ctx) => {
       if (res.status === 401) { project.replaceChildren(new Option("请先授权 GitHub", "")); auth.hidden = false; projectStatus.textContent = "请先授权 GitHub，授权后可选择组织内项目。"; return; }
       if (!res.ok) throw new Error(await errorText(res));
       const repos = (await res.json())?.repos || [];
+      auth.hidden = true;
       repos.forEach((x) => repoRefs.set(x.full_name, x.default_branch || "main"));
       project.replaceChildren(...repos.map((x) => new Option((x.private ? "🔒 " : "") + x.full_name, x.full_name)));
       if (!repos.length) project.append(new Option("没有可访问的项目", ""));
