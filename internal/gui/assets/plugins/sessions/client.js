@@ -237,22 +237,31 @@ magpie.plugin("sessions", (ctx) => {
     page.replaceChildren();
     page.classList.add("everyapi-chat-page");
     const title = el("div", "everyapi-chat-title");
-    title.append(el("h2", "", "EveryAPI 对话"));
+    title.append(el("h2", "", "EveryAPI 项目助手"));
     const model = el("select", "everyapi-chat-model");
     model.disabled = true;
     model.append(new Option("加载模型…", ""));
     title.append(model);
+    const projectRow = el("div", "everyapi-project-row");
+    const project = el("select", "everyapi-project-select");
+    project.append(new Option("加载 GitHub 项目…", ""));
+    const auth = el("a", "everyapi-project-auth", "授权 GitHub");
+    auth.href = "/_github/start"; auth.hidden = true;
+    const pr = el("button", "everyapi-project-pr", "创建 Pull Request");
+    pr.type = "button"; pr.hidden = true;
+    projectRow.append(project, auth, pr);
+    const projectStatus = el("p", "everyapi-project-status", "授权 GitHub 后选择项目，网关会在工作区中修改代码。");
     const messages = el("div", "everyapi-chat-messages");
     const empty = el("div", "everyapi-chat-empty", "选择模型后，在下方输入消息。");
     messages.append(empty);
     const form = el("form", "everyapi-chat-form");
     const input = el("textarea", "everyapi-chat-input");
-    input.rows = 1; input.maxLength = 20000; input.placeholder = "输入消息…"; input.setAttribute("aria-label", "消息");
-    const send = el("button", "everyapi-chat-send", "➤");
+    input.rows = 1; input.maxLength = 20000; input.placeholder = "描述要修改的代码…"; input.setAttribute("aria-label", "代码修改要求");
+    const send = el("button", "everyapi-chat-send", "修改");
     send.type = "submit"; send.setAttribute("aria-label", "发送");
     form.append(input, send);
-    page.append(title, messages, form);
-    let history = [], controller = null, assistant = null;
+    page.append(title, projectRow, projectStatus, messages, form);
+    let controller = null, selectedRepo = "", lastPrompt = "", lastResult = null;
     const bubble = (role, text, error = false) => {
       empty.hidden = true;
       const b = el("div", "everyapi-chat-msg " + (error ? "error" : role), text);
@@ -266,22 +275,41 @@ magpie.plugin("sessions", (ctx) => {
       if (!list.length) model.append(new Option("暂无模型", ""));
       model.disabled = false;
     }).catch((err) => { model.replaceChildren(new Option("模型加载失败", "")); model.disabled = false; bubble("assistant", err.message, true); });
+    fetch("/api/github/repos", { headers: { Accept: "application/json" } }).then(async (res) => {
+      if (res.status === 401) { project.replaceChildren(new Option("请先授权 GitHub", "")); auth.hidden = false; projectStatus.textContent = "请先授权 GitHub，授权后可选择组织内项目。"; return; }
+      if (!res.ok) throw new Error(await errorText(res));
+      const repos = (await res.json())?.repos || [];
+      project.replaceChildren(...repos.map((x) => new Option((x.private ? "🔒 " : "") + x.full_name, x.full_name)));
+      if (!repos.length) project.append(new Option("没有可访问的项目", ""));
+      projectStatus.textContent = repos.length ? "选择项目后输入修改要求，EveryAPI 会读取并修改工作区。" : "当前 GitHub 账号没有可访问的项目。";
+    }).catch((err) => { project.replaceChildren(new Option("GitHub 项目加载失败", "")); projectStatus.textContent = err.message; });
+    project.onchange = async () => {
+      selectedRepo = project.value; pr.hidden = true; lastResult = null;
+      if (!selectedRepo) return;
+      project.disabled = true; projectStatus.textContent = "正在克隆项目…";
+      try { const res = await fetch("/api/github/workspace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo: selectedRepo }) }); if (!res.ok) throw new Error(await errorText(res)); const out = await res.json(); projectStatus.textContent = `${out.repo} 已准备好，可以描述修改。`; }
+      catch (err) { projectStatus.textContent = err.message; project.value = ""; selectedRepo = ""; }
+      finally { project.disabled = false; }
+    };
     form.onsubmit = async (event) => {
       event.preventDefault(); const text = input.value.trim();
-      if (!text || !model.value || controller) return;
-      input.value = ""; history.push({ role: "user", content: text }); bubble("user", text);
-      controller = new AbortController(); input.disabled = true; model.disabled = true; send.disabled = true; assistant = null;
+      if (!text || !model.value || !selectedRepo || controller) { if (!selectedRepo) projectStatus.textContent = "请先选择 GitHub 项目。"; return; }
+      input.value = ""; lastPrompt = text; bubble("user", text);
+      controller = new AbortController(); input.disabled = true; model.disabled = true; project.disabled = true; send.disabled = true;
       try {
-        const res = await fetch("/api/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json" }, body: JSON.stringify({ model: model.value, messages: history, stream: true }), signal: controller.signal });
+        const res = await fetch("/api/github/agent", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ model: model.value, prompt: text }), signal: controller.signal });
         if (!res.ok) throw new Error(await errorText(res));
-        const type = res.headers.get("content-type") || "";
-        if (type.includes("text/event-stream")) {
-          const reader = res.body.getReader(), decoder = new TextDecoder(); let buffer = "";
-          while (true) { const part = await reader.read(); if (part.done) break; buffer += decoder.decode(part.value, { stream: true }); const lines = buffer.split(/\r?\n/); buffer = lines.pop() || ""; for (const line of lines) { const value = line.startsWith("data:") ? line.slice(5).trim() : ""; if (!value || value === "[DONE]") continue; try { const d = JSON.parse(value), delta = d?.choices?.[0]?.delta?.content ?? d?.choices?.[0]?.text ?? ""; if (delta) { if (!assistant) assistant = bubble("assistant", ""); assistant.textContent += delta; messages.scrollTop = messages.scrollHeight; } } catch {} } }
-        } else { const d = await res.json(), text = d?.choices?.[0]?.message?.content ?? d?.choices?.[0]?.text ?? ""; assistant = bubble("assistant", typeof text === "string" ? text : JSON.stringify(text)); }
-        if (assistant) history.push({ role: "assistant", content: assistant.textContent }); else bubble("assistant", "（模型没有返回文本）");
-      } catch (err) { if (err.name !== "AbortError") { bubble("assistant", err.message || "请求失败", true); history.pop(); } }
-      finally { controller = null; input.disabled = false; model.disabled = false; send.disabled = false; input.focus(); }
+        const out = await res.json(); lastResult = out; const answer = bubble("assistant", out.message || "修改已完成。");
+        if (out.diff) { const diff = document.createElement("pre"); diff.className = "everyapi-project-diff"; diff.textContent = out.diff; answer.after(diff); }
+        projectStatus.textContent = out.files?.length ? `已修改 ${out.files.length} 个文件，可创建 Pull Request。` : "没有检测到文件修改。";
+        pr.hidden = !out.files?.length;
+      } catch (err) { if (err.name !== "AbortError") { bubble("assistant", err.message || "请求失败", true); projectStatus.textContent = "修改失败"; } }
+      finally { controller = null; input.disabled = false; model.disabled = false; project.disabled = false; send.disabled = false; input.focus(); }
+    };
+    pr.onclick = async () => {
+      if (!lastResult?.files?.length) return;
+      pr.disabled = true; projectStatus.textContent = "正在创建 Pull Request…";
+      try { const res = await fetch("/api/github/pull-request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: lastPrompt.slice(0, 72), body: `由 EveryAPI Gateway 根据以下要求生成：\n\n${lastPrompt}` }) }); if (!res.ok) throw new Error(await errorText(res)); const out = await res.json(); projectStatus.textContent = "Pull Request 已创建。"; const link = el("a", "everyapi-project-auth", out.html_url || "打开 Pull Request"); link.href = out.html_url; link.target = "_blank"; messages.append(link); pr.hidden = true; } catch (err) { projectStatus.textContent = err.message; } finally { pr.disabled = false; }
     };
     input.oninput = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 180) + "px"; };
   }

@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	githubStartPath    = "/_github/start"
-	githubCallbackPath = "/_github/callback"
-	githubStateCookie  = "magpie_github_state"
-	githubStateAge     = 10 * time.Minute
+	githubStartPath     = "/_github/start"
+	githubCallbackPath  = "/_github/callback"
+	githubStateCookie   = "magpie_github_state"
+	githubSessionCookie = "magpie_github_session"
+	githubStateAge      = 10 * time.Minute
 )
 
 type githubAuthConfig struct {
@@ -77,7 +78,7 @@ func webGitHubRoutes(cookie, key string, keep time.Duration, next http.Handler) 
 			secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 			http.SetCookie(w, &http.Cookie{Name: githubStateCookie, Value: state, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int(githubStateAge / time.Second)})
 			redirect := githubCallbackURL(r)
-			q := url.Values{"client_id": {cfg.ClientID}, "redirect_uri": {redirect}, "scope": {"read:org user:email"}, "state": {state}}
+			q := url.Values{"client_id": {cfg.ClientID}, "redirect_uri": {redirect}, "scope": {"repo read:org user:email"}, "state": {state}}
 			http.Redirect(w, r, "https://github.com/login/oauth/authorize?"+q.Encode(), http.StatusFound)
 		case githubCallbackPath:
 			webGitHubCallback(w, r, cfg, cookie, key, keep)
@@ -152,8 +153,15 @@ func webGitHubCallback(w http.ResponseWriter, r *http.Request, cfg githubAuthCon
 	}
 	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 	maxAge := int(keep / time.Second)
+	sessionID, err := randomWebGitHubState()
+	if err != nil {
+		webGitHubError(w, "无法创建 GitHub 会话，请稍后重试。")
+		return
+	}
+	githubSessions.Store(sessionID, &githubSession{Token: token.AccessToken, Username: username, Expires: time.Now().Add(24 * time.Hour)})
+	http.SetCookie(w, &http.Cookie{Name: githubSessionCookie, Value: sessionID, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int((24 * time.Hour) / time.Second)})
 	http.SetCookie(w, &http.Cookie{Name: cookie, Value: key, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: maxAge})
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings?view=sessions", http.StatusSeeOther)
 }
 
 func githubUsername(ctx context.Context, client *http.Client, token string) (string, error) {
