@@ -107,7 +107,7 @@ async function main() {
     await page.locator('#nav [data-view=providers]').click();
     await page.locator('#everyapiAPIKey').fill(upstreamKey);
     const fetched = page.waitForResponse(r => new URL(r.url()).pathname === '/api/everyapi/models');
-    await page.getByRole('button', { name: 'Save and refresh models', exact: true }).click();
+    await page.locator('#everyapiConfig .everyapi-actions button[type=button]').click();
     assert.equal((await fetched).status(), 200);
     await page.locator('#everyapiConfig input[name=models]').waitFor();
     const providers = await page.evaluate(() => fetch('/api/providers').then(r => r.json()));

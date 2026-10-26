@@ -238,15 +238,20 @@ magpie.plugin("sessions", (ctx) => {
     page.replaceChildren();
     page.classList.add("everyapi-chat-page", "everyapi-workbench");
     const title = el("div", "everyapi-chat-title");
-    title.append(el("div", "everyapi-title-mark", "WORKSPACE"), el("h2", "", "EveryAPI 工作站"), el("span", "everyapi-title-sub", "从任务到 Pull Request"));
+    const repoName = el("button", "everyapi-project-select", t("Project workspace"));
+    repoName.type = "button";
+    const refName = el("span", "everyapi-repo-ref");
+    const toggleTasks = el("button", "everyapi-task-toggle", t("Collapse project tasks"));
+    toggleTasks.type = "button"; toggleTasks.setAttribute("aria-expanded", "true");
+    title.append(repoName, refName, toggleTasks);
     const model = el("select", "everyapi-chat-model");
     model.setAttribute("aria-label", "模型");
     model.disabled = true;
     model.append(new Option("加载模型…", ""));
     const projectRow = el("div", "everyapi-project-row");
-    const project = el("select", "everyapi-project-select");
+    const project = repoName;
     project.setAttribute("aria-label", "GitHub 项目");
-    project.append(new Option("加载 GitHub 项目…", ""));
+    project.disabled = true;
     const auth = el("a", "everyapi-project-auth", "授权 GitHub");
     auth.hidden = true;
     auth.href = "/_github/start";
@@ -254,8 +259,8 @@ magpie.plugin("sessions", (ctx) => {
     oauthEdit.type = "button"; oauthEdit.hidden = true;
     const pr = el("button", "everyapi-project-pr", "创建 Pull Request");
     pr.type = "button"; pr.hidden = true;
-    const projectLabel = el("div", "everyapi-panel-label", "项目");
-    projectRow.append(project, auth, oauthEdit);
+    const projectLabel = el("div", "everyapi-panel-label", t("Workspace files"));
+    projectRow.append(auth, oauthEdit);
     const oauthForm = el("form", "everyapi-github-config");
     oauthForm.hidden = true;
     const oauthTitle = el("strong", "", "配置 GitHub OAuth App");
@@ -273,14 +278,29 @@ magpie.plugin("sessions", (ctx) => {
     oauthForm.append(oauthTitle, oauthHint, oauthCreate, oauthID, oauthSecret, oauthOrg, oauthSave);
     const projectStatus = el("p", "everyapi-project-status", "授权 GitHub 后选择项目，网关会在工作区中修改代码。");
     projectStatus.setAttribute("role", "status");
-    const filesTitle = el("div", "everyapi-panel-label", "工作区文件");
+    const chooser = el("section", "everyapi-project-chooser");
+    const chooserHeader = el("div", "everyapi-chooser-header");
+    const chooserTitle = el("h1", "", t("Open a project"));
+    const chooserHint = el("p", "", t("Connect GitHub, choose a repository, and start working on its code."));
+    const connectionStatus = el("span", "everyapi-connection-status", t("Checking GitHub connection…"));
+    const retry = el("button", "everyapi-repo-retry", t("Reload repositories"));
+    retry.type = "button";
+    const back = el("button", "everyapi-repo-back", t("Return to current project"));
+    back.type = "button"; back.hidden = true;
+    chooserHeader.append(chooserTitle, chooserHint);
+    const chooserActions = el("div", "everyapi-chooser-actions");
+    chooserActions.append(connectionStatus, retry, back);
+    const repoSearch = el("input", "everyapi-repo-search");
+    repoSearch.type = "search"; repoSearch.placeholder = t("Search repository names…"); repoSearch.setAttribute("aria-label", t("Search GitHub repositories")); repoSearch.hidden = true;
+    const repoList = el("div", "everyapi-repo-list");
+    chooser.append(chooserHeader, chooserActions, projectRow, oauthForm, repoSearch, repoList);
     const fileSearch = el("input", "everyapi-file-search");
-    fileSearch.type = "search"; fileSearch.placeholder = "搜索文件路径…"; fileSearch.setAttribute("aria-label", "搜索文件路径");
+    fileSearch.type = "search"; fileSearch.placeholder = t("Search workspace file paths…"); fileSearch.setAttribute("aria-label", t("Search workspace file paths"));
     const filesList = el("div", "everyapi-project-files", "选择项目后显示文件");
     const projectPanel = el("aside", "everyapi-workbench-project");
-    projectPanel.append(projectLabel, projectRow, filesTitle, fileSearch, filesList);
-    const taskLabel = el("div", "everyapi-panel-label", "任务记录");
-    const stop = el("button", "everyapi-task-stop", "停止任务");
+    projectPanel.append(projectLabel, fileSearch, filesList);
+    const taskLabel = el("div", "everyapi-panel-label", t("Project tasks"));
+    const stop = el("button", "everyapi-task-stop", t("Stop project task"));
     stop.type = "button"; stop.hidden = true;
     const taskToolbar = el("div", "everyapi-task-toolbar");
     taskToolbar.append(taskLabel, stop);
@@ -291,9 +311,14 @@ magpie.plugin("sessions", (ctx) => {
     activity.append(activitySummary, activityLog);
     const messages = el("div", "everyapi-chat-messages");
     const empty = el("div", "everyapi-chat-empty");
-    empty.append(el("strong", "", "从一个具体任务开始"), el("p", "", "选择 GitHub 项目，描述需求，在变更页审查代码并创建 Pull Request。"));
-    const chooseProject = el("button", "everyapi-choose-project", "选择项目");
-    chooseProject.type = "button"; empty.append(chooseProject);
+    empty.append(el("strong", "", t("What would you like to change?")), el("p", "", t("Describe a change or problem. The assistant will inspect this project and prepare code changes.")));
+    const suggestions = el("div", "everyapi-task-suggestions");
+    for (const [label, prompt] of [[t("Explore this project"), t("Read the README and main entry points, then explain the project structure. Do not change files yet.")], [t("Fix a project issue"), t("Help me fix this issue: ")], [t("Add a project feature"), t("Help me implement this feature: ")]]) {
+      const suggestion = el("button", "", label); suggestion.type = "button";
+      suggestion.onclick = () => { input.value = prompt; input.focus({ preventScroll: true }); input.dispatchEvent(new Event("input")); };
+      suggestions.append(suggestion);
+    }
+    empty.append(suggestions);
     messages.append(empty);
     const form = el("form", "everyapi-chat-form");
     const input = el("textarea", "everyapi-chat-input");
@@ -303,9 +328,8 @@ magpie.plugin("sessions", (ctx) => {
     form.append(model, input, send);
     const center = el("main", "everyapi-workbench-center");
     center.append(taskToolbar, activity, messages, form);
-    const changedTitle = el("div", "everyapi-panel-label", "变更");
+    const changedTitle = el("div", "everyapi-panel-label", t("Modified project files"));
     const changedFiles = el("div", "everyapi-changed-files", "暂无变更");
-    const diffTitle = el("div", "everyapi-panel-label everyapi-diff-label", "审查 diff");
     const diff = el("pre", "everyapi-project-diff", "任务完成后显示变更");
     const reviewHint = el("p", "everyapi-review-hint", "先检查变更，再创建 Pull Request。");
     const pullRequestLink = el("div", "everyapi-project-pr-link");
@@ -313,49 +337,101 @@ magpie.plugin("sessions", (ctx) => {
     filePreview.hidden = true;
     const filePreviewTitle = el("div", "everyapi-file-preview-title");
     const filePreviewPath = el("strong", "");
-    const filePreviewClose = el("button", "", "关闭文件");
+    const filePreviewClose = el("button", "", t("Close workspace file"));
     filePreviewClose.type = "button";
     const filePreviewContent = el("pre", "everyapi-file-content");
     const filePreviewNote = el("span", "everyapi-review-hint");
     filePreviewTitle.append(filePreviewPath, filePreviewClose);
     filePreview.append(filePreviewTitle, filePreviewContent, filePreviewNote);
+    const codeTabs = el("div", "everyapi-code-tabs");
+    const sourceTab = el("button", "on", t("Project code"));
+    const diffTab = el("button", "", t("Project changes ({n})", { n: 0 }));
+    sourceTab.type = diffTab.type = "button";
+    codeTabs.append(sourceTab, diffTab);
+    const codeEmpty = el("div", "everyapi-code-empty", t("Choose a workspace file to view its code"));
+    const reviewArea = el("section", "everyapi-review-area");
+    reviewArea.hidden = true;
+    reviewArea.append(changedTitle, changedFiles, diff, reviewHint, pullRequestLink, pr);
     const reviewPanel = el("aside", "everyapi-workbench-review");
-    reviewPanel.append(changedTitle, changedFiles, filePreview, diffTitle, diff, reviewHint, pullRequestLink, pr);
+    reviewPanel.append(codeTabs, codeEmpty, filePreview, reviewArea);
     const mobileTabs = el("div", "everyapi-workbench-tabs");
-    ["项目", "任务", "变更"].forEach((label, index) => { const tab = el("button", index === 1 ? "on" : "", label); tab.type = "button"; tab.dataset.panel = ["project", "center", "review"][index]; mobileTabs.append(tab); });
+    [t("Workspace files"), t("Project code"), t("Project task")].forEach((label, index) => { const tab = el("button", index === 1 ? "on" : "", label); tab.type = "button"; tab.dataset.panel = ["project", "review", "center"][index]; mobileTabs.append(tab); });
     const workbench = el("div", "everyapi-workbench-grid");
-    workbench.dataset.mobilePanel = "center";
-    workbench.append(projectPanel, center, reviewPanel);
-    page.append(title, oauthForm, projectStatus, mobileTabs, workbench);
+    workbench.dataset.mobilePanel = "review";
+    workbench.dataset.taskOpen = "true";
+    workbench.append(projectPanel, reviewPanel, center);
+    page.append(chooser, title, mobileTabs, workbench, projectStatus);
     let controller = null, selectedRepo = "", lastPrompt = "", lastResult = null;
     let workspaceFileNames = [], fileLimit = 80, previewRequest = 0;
+    let repositories = [], repoLoad = 0, loadingRepos = false;
+    const showChooser = (on) => {
+      chooser.hidden = !on; title.hidden = mobileTabs.hidden = workbench.hidden = on;
+      back.hidden = !selectedRepo;
+      page.dataset.openProject = String(!on);
+    };
+    showChooser(true);
     const setPanel = (panel) => {
       mobileTabs.querySelectorAll("button").forEach((item) => { item.classList.toggle("on", item.dataset.panel === panel); item.setAttribute("aria-pressed", String(item.dataset.panel === panel)); });
       workbench.dataset.mobilePanel = panel;
     };
-    chooseProject.onclick = () => { setPanel("project"); project.focus({ preventScroll: true }); };
+    project.onclick = () => { showChooser(true); repoSearch.focus({ preventScroll: true }); };
+    back.onclick = () => showChooser(false);
+    toggleTasks.onclick = () => { const on = workbench.dataset.taskOpen !== "true"; workbench.dataset.taskOpen = String(on); toggleTasks.textContent = on ? t("Collapse project tasks") : t("Expand project tasks"); toggleTasks.setAttribute("aria-expanded", String(on)); };
+    const codeView = (changes) => {
+      reviewArea.hidden = !changes; sourceTab.classList.toggle("on", !changes); diffTab.classList.toggle("on", changes);
+      filePreview.hidden = changes || !filePreviewPath.textContent; codeEmpty.hidden = changes || !!filePreviewPath.textContent;
+    };
+    sourceTab.onclick = () => codeView(false);
+    diffTab.onclick = () => codeView(true);
     const openFile = async (name) => {
-      const request = ++previewRequest;
-      setPanel("review"); filePreview.hidden = false; filePreviewPath.textContent = name;
+      const previewID = ++previewRequest;
+      setPanel("review"); filePreviewPath.textContent = name; codeView(false);
+      filesList.querySelectorAll(".everyapi-workspace-file").forEach((row) => row.classList.toggle("on", row.textContent === name));
       filePreviewContent.textContent = "正在读取文件…"; filePreviewNote.textContent = "";
       try {
-        const res = await fetch("/api/github/file?" + new URLSearchParams({ path: name }), { headers: { Accept: "application/json" } });
+        const res = await request("/api/github/file?" + new URLSearchParams({ path: name }), { headers: { Accept: "application/json" } });
         if (!res.ok) throw new Error(await errorText(res));
         const out = await res.json();
-        if (request !== previewRequest) return;
-        filePreviewContent.textContent = out.content;
+        if (previewID !== previewRequest) return;
+        filePreviewContent.replaceChildren(...out.content.split("\n").map((line, index) => { const row = el("span", "everyapi-code-line"); const number = el("span", "everyapi-line-number", String(index + 1)); number.setAttribute("aria-hidden", "true"); row.append(number, el("span", "everyapi-line-text", line || " ")); return row; }));
         filePreviewNote.textContent = out.truncated ? "文件较大，显示前 256 KiB。" : "当前工作区文件 · 只读预览";
-      } catch (err) { if (request === previewRequest) filePreviewContent.textContent = err.message; }
+      } catch (err) { if (previewID === previewRequest) filePreviewContent.textContent = err.message; }
     };
-    filePreviewClose.onclick = () => { previewRequest++; filePreview.hidden = true; };
+    filePreviewClose.onclick = () => { previewRequest++; filePreviewPath.textContent = ""; codeView(false); };
     const repoRefs = new Map();
+    const formatProjectMessage = (text) => {
+      const body = el("div", "everyapi-message-body");
+      let prose = [], code = null, fence = "";
+      const flush = () => { if (prose.length) body.append(noteBlocks(prose.join("\n"))); prose = []; };
+      for (const line of String(text).split(/\r?\n/)) {
+        const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+        if (code !== null) {
+          if (marker && marker[0] === fence[0] && marker.length >= fence.length) { body.append(el("pre", "", code.join("\n"))); code = null; }
+          else code.push(line);
+        } else if (marker) { flush(); fence = marker; code = []; }
+        else prose.push(line);
+      }
+      flush();
+      if (code !== null) body.append(el("pre", "", code.join("\n")));
+      body.querySelectorAll("a").forEach((link) => { link.onclick = null; link.rel = "noopener noreferrer"; });
+      return body;
+    };
     const bubble = (role, text, error = false) => {
       empty.hidden = true;
-      const b = el("div", "everyapi-chat-msg " + (error ? "error" : role), text);
+      const b = el("div", "everyapi-chat-msg " + (error ? "error" : role));
+      if (role === "assistant" && !error) b.append(formatProjectMessage(text));
+      else b.textContent = text;
       messages.append(b); messages.scrollTop = messages.scrollHeight; return b;
     };
     const errorText = async (res) => { const text = await res.text(); try { const x = JSON.parse(text); return x?.error?.message || x?.error || text || res.statusText; } catch { return text || res.statusText; } };
-    fetch("/api/chat/models", { headers: { Accept: "application/json" } }).then(async (res) => {
+    const request = async (url, options = {}, timeout = 20000) => {
+      const timeoutController = new AbortController();
+      const timer = setTimeout(() => timeoutController.abort(), timeout);
+      try { return await fetch(url, { ...options, signal: options.signal ? AbortSignal.any([options.signal, timeoutController.signal]) : timeoutController.signal }); }
+      catch (err) { if (timeoutController.signal.aborted) throw new Error(t("The request timed out. Reload to retry; the workspace and changes are retained.")); throw err; }
+      finally { clearTimeout(timer); }
+    };
+    request("/api/chat/models", { headers: { Accept: "application/json" } }).then(async (res) => {
       if (!res.ok) throw new Error(await errorText(res));
       const list = (await res.json())?.data || [];
       model.replaceChildren(...list.map((x) => new Option(x.id, x.id)));
@@ -364,6 +440,7 @@ magpie.plugin("sessions", (ctx) => {
       model.disabled = !!controller;
     }).catch((err) => { model.replaceChildren(new Option("模型加载失败", "")); model.disabled = false; bubble("assistant", err.message, true); });
     const updateFiles = (files = []) => {
+      diffTab.textContent = t("Project changes ({n})", { n: files.length });
       changedFiles.replaceChildren();
       if (!files.length) { changedFiles.textContent = "暂无变更"; return; }
       files.forEach((name) => { const row = el("button", "everyapi-file-row", name); row.type = "button"; row.onclick = () => openFile(name); changedFiles.append(row); });
@@ -386,23 +463,25 @@ magpie.plugin("sessions", (ctx) => {
     };
     const showResult = (out, error = "", published = false) => {
       lastResult = out;
+      activitySummary.textContent = error ? t("Project task failed") : t("Project task completed");
       showPullRequest("");
       if (error) bubble("assistant", error, true);
       if (out) {
         bubble("assistant", out.message || "修改已完成。");
-        diff.textContent = out.diff || "没有可显示的 diff";
+        diff.replaceChildren(...(out.diff || "没有可显示的 diff").split("\n").map((line) => el("span", "everyapi-diff-line " + (line.startsWith("@@") ? "hunk" : line.startsWith("+") && !line.startsWith("+++") ? "add" : line.startsWith("-") && !line.startsWith("---") ? "remove" : ""), line || " ")));
         updateFiles(out.files || []);
         updateWorkspaceFiles([...new Set([...workspaceFileNames, ...(out.files || [])])].sort());
         reviewHint.textContent = error ? "任务失败，但已有修改保留。检查 diff 后可重试。" : "检查完成后创建 Pull Request。";
       }
       projectStatus.textContent = error ? "任务未完成，已有修改保留，可检查后重试。" : out?.files?.length ? `已修改 ${out.files.length} 个文件，可创建 Pull Request。` : "没有检测到文件修改。";
       pr.hidden = published || !out?.files?.length;
+      if (out?.files?.length) { setPanel("review"); codeView(true); }
     };
     const busy = (on) => { input.disabled = on; model.disabled = on; project.disabled = on; send.disabled = on; pr.disabled = on; stop.hidden = !on; center.setAttribute("aria-busy", String(on)); send.textContent = on ? "执行中…" : "修改"; };
     stop.onclick = async () => {
       stop.disabled = true;
       try {
-        const res = await fetch("/api/github/agent", { method: "DELETE" });
+        const res = await request("/api/github/agent", { method: "DELETE" });
         if (!res.ok) throw new Error(await errorText(res));
         projectStatus.textContent = "正在停止任务，保留已完成的修改…";
       } catch (err) { projectStatus.textContent = err.message; }
@@ -413,7 +492,7 @@ magpie.plugin("sessions", (ctx) => {
       projectStatus.textContent = "正在读取并修改项目，刷新页面后可继续查看进度…";
       try {
         for (;;) {
-          const res = await fetch("/api/github/agent", { headers: { Accept: "application/json" }, signal: controller.signal });
+          const res = await request("/api/github/agent", { headers: { Accept: "application/json" }, signal: controller.signal });
           if (!res.ok) throw new Error(await errorText(res));
           const out = await res.json();
           if (out.activity?.length) { activity.hidden = false; activitySummary.textContent = out.activity[out.activity.length - 1]; activityLog.textContent = out.activity.join("\n"); }
@@ -422,56 +501,92 @@ magpie.plugin("sessions", (ctx) => {
         }
       } finally { controller = null; busy(false); }
     };
-    const loadRepos = async () => {
-      const status = await fetch("/api/github/status", { headers: { Accept: "application/json" } });
-      if (!status.ok) throw new Error(await errorText(status));
-      const config = await status.json();
-      const callback = new URL(config.callback_url || "/_github/callback", location.origin);
-      oauthHint.textContent = `回调地址必须是 ${callback.href}`;
-      oauthCreate.href = "https://github.com/settings/applications/new?" + new URLSearchParams({ name: "EveryAPI Gateway", url: callback.origin, callback_url: callback.href });
-      if (config.organization) oauthOrg.value = config.organization;
-      if (!config.configured) {
-        auth.hidden = true; oauthEdit.hidden = true; project.disabled = true;
-        oauthForm.hidden = false;
-        project.replaceChildren(new Option("GitHub 尚未配置", ""));
-        projectStatus.textContent = "先保存 GitHub OAuth App，保存后即可授权并选择项目。";
-        return;
-      }
-      oauthForm.hidden = true;
-      oauthEdit.hidden = !!config.managed;
-      project.disabled = false;
-      const res = await fetch("/api/github/repos", { headers: { Accept: "application/json" } });
-      if (res.status === 401) { project.replaceChildren(new Option("请先授权 GitHub", "")); auth.hidden = false; projectStatus.textContent = "请先授权 GitHub，授权后可选择组织内项目。"; return; }
-      if (!res.ok) throw new Error(await errorText(res));
-      const repos = (await res.json())?.repos || [];
-      auth.hidden = true;
-      repos.forEach((x) => repoRefs.set(x.full_name, x.default_branch || "main"));
-      project.replaceChildren(new Option(repos.length ? "选择 GitHub 项目…" : "没有可访问的项目", ""), ...repos.map((x) => new Option(x.full_name, x.full_name)));
-      projectStatus.textContent = repos.length ? "选择项目后输入修改要求，EveryAPI 会读取并修改工作区。" : "当前 GitHub 账号没有可访问的项目。";
-      const current = await fetch("/api/github/workspace", { headers: { Accept: "application/json" } });
-      if (!current.ok) throw new Error(await errorText(current));
-      const workspace = await current.json();
-      if (workspace.selected) {
-        selectedRepo = workspace.repo; project.value = selectedRepo;
-        updateWorkspaceFiles(workspace.files || []);
-        projectStatus.textContent = `${selectedRepo} 已准备好，可以描述修改。`;
-        lastPrompt = workspace.prompt || "";
-        if (lastPrompt) bubble("user", lastPrompt);
-        if (workspace.running) await waitForAgent();
-        else if (workspace.result) showResult(workspace.result, workspace.error, !!workspace.pull_request);
-        if (workspace.pull_request?.html_url) {
-          showPullRequest(workspace.pull_request.html_url);
-        }
-      }
+    const renderRepos = () => {
+      const needle = repoSearch.value.trim().toLowerCase();
+      const visible = repositories.filter((repo) => repo.full_name.toLowerCase().includes(needle));
+      repoList.replaceChildren();
+      if (!visible.length) { repoList.append(el("p", "everyapi-repo-empty", needle ? t("No repositories match your search") : t("No writable repositories are available. Check your GitHub repository and organization access."))); return; }
+      visible.slice(0, 60).forEach((repo) => {
+        const card = el("button", "everyapi-repo-card"); card.type = "button"; card.dataset.repo = repo.full_name;
+        const name = el("strong", "", repo.full_name);
+        const meta = el("span", "everyapi-repo-meta", `${repo.private ? t("Private repository") : t("Public repository")} · ${repo.default_branch || "main"}`);
+        card.append(name, el("span", "everyapi-repo-description", repo.description || t("Open this repository to explore its code")), meta);
+        card.onclick = () => selectRepository(repo.full_name);
+        repoList.append(card);
+      });
+      if (visible.length > 60) repoList.append(el("p", "everyapi-repo-empty", t("Search by name to find more repositories.")));
     };
-    loadRepos().catch((err) => { if (!selectedRepo) project.replaceChildren(new Option("GitHub 项目加载失败", "")); projectStatus.textContent = err.message; });
+    repoSearch.oninput = renderRepos;
+    const openWorkspace = (workspace) => {
+      selectedRepo = workspace.repo; project.value = selectedRepo; project.textContent = selectedRepo;
+      refName.textContent = workspace.ref || repoRefs.get(selectedRepo) || "main";
+      project.disabled = false;
+      updateWorkspaceFiles(workspace.files || []);
+      showChooser(false);
+      projectStatus.textContent = `${selectedRepo} 已准备好，可以描述修改。`;
+      const readme = workspaceFileNames.find((name) => /^readme(?:\.[\w-]+)?$/i.test(name)) || workspaceFileNames[0];
+      if (readme) openFile(readme);
+    };
+    const loadRepos = async () => {
+      if (loadingRepos) return;
+      const currentLoad = ++repoLoad;
+      loadingRepos = true; retry.disabled = true; repoSearch.hidden = true; auth.hidden = true;
+      connectionStatus.textContent = t("Checking GitHub connection…");
+      repoList.replaceChildren();
+      try {
+        const status = await request("/api/github/status", { headers: { Accept: "application/json" } });
+        if (!status.ok) throw new Error(await errorText(status));
+        const config = await status.json();
+        const callback = new URL(config.callback_url || "/_github/callback", location.origin);
+        oauthHint.textContent = `回调地址必须是 ${callback.href}`;
+        oauthCreate.href = "https://github.com/settings/applications/new?" + new URLSearchParams({ name: "EveryAPI Gateway", url: callback.origin, callback_url: callback.href });
+        if (config.organization) oauthOrg.value = config.organization;
+        oauthForm.hidden = !!config.configured;
+        oauthEdit.hidden = !config.configured || !!config.managed;
+        if (!config.configured) { connectionStatus.textContent = t("GitHub is not configured"); projectStatus.textContent = t("Configure the GitHub OAuth App to continue."); return; }
+        connectionStatus.textContent = t("Loading GitHub repositories…");
+        const res = await request("/api/github/repos", { headers: { Accept: "application/json" } });
+        if (res.status === 401) {
+          chooserTitle.textContent = t("Connect GitHub");
+          connectionStatus.textContent = t("GitHub not connected"); auth.textContent = t("Connect GitHub"); auth.hidden = false;
+          chooserHint.textContent = t("Authorize GitHub to browse repositories, inspect code, and prepare changes with the assistant.");
+          projectStatus.textContent = t("Connect GitHub to open a project.");
+          return;
+        }
+        if (!res.ok) throw new Error(await errorText(res));
+        const out = await res.json();
+        repositories = out.repos || []; repoRefs.clear();
+        repositories.forEach((repo) => repoRefs.set(repo.full_name, repo.default_branch || "main"));
+        chooserTitle.textContent = t("Open a project");
+        chooserHint.textContent = t("Choose a repository. Changes stay in the workspace until you review them and create a Pull Request.");
+        connectionStatus.textContent = `${out.user ? "@" + out.user + " · " : ""}${t("{n} writable repositories", { n: repositories.length })}`;
+        repoSearch.hidden = false; renderRepos();
+        if (!selectedRepo) {
+          const current = await request("/api/github/workspace", { headers: { Accept: "application/json" } });
+          if (!current.ok) throw new Error(await errorText(current));
+          const workspace = await current.json();
+          if (currentLoad !== repoLoad) return;
+          if (workspace.selected) {
+            openWorkspace(workspace);
+            lastPrompt = workspace.prompt || "";
+            if (lastPrompt) bubble("user", lastPrompt);
+            if (workspace.running) await waitForAgent();
+            else if (workspace.result) showResult(workspace.result, workspace.error, !!workspace.pull_request);
+            if (workspace.pull_request?.html_url) showPullRequest(workspace.pull_request.html_url);
+          }
+        }
+      } catch (err) { connectionStatus.textContent = t("GitHub repositories could not be loaded"); repoList.append(el("p", "everyapi-repo-error", err.message)); projectStatus.textContent = err.message; }
+      finally { loadingRepos = false; retry.disabled = false; }
+    };
+    retry.onclick = loadRepos;
+    loadRepos();
     model.onchange = () => { try { localStorage.setItem("everyapi.projectModel", model.value); } catch {} };
     oauthForm.onsubmit = async (event) => {
       event.preventDefault();
       oauthSave.disabled = true;
       projectStatus.textContent = "正在保存 GitHub OAuth 配置…";
       try {
-        const res = await fetch("/api/github/config", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ client_id: oauthID.value, client_secret: oauthSecret.value, organization: oauthOrg.value }) });
+        const res = await request("/api/github/config", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ client_id: oauthID.value, client_secret: oauthSecret.value, organization: oauthOrg.value }) });
         if (!res.ok) throw new Error(await errorText(res));
         oauthSecret.value = "";
         oauthEdit.hidden = false;
@@ -488,23 +603,28 @@ magpie.plugin("sessions", (ctx) => {
       projectStatus.textContent = "输入新的 Client ID 和 Client Secret 后保存。";
       oauthID.focus({ preventScroll: true });
     };
-    project.onchange = async () => {
-      const requestedRepo = project.value;
-      if (!requestedRepo) { project.value = selectedRepo; return; }
+    const selectRepository = async (requestedRepo) => {
+      if (!requestedRepo || loadingRepos) return;
+      if (requestedRepo === selectedRepo) { showChooser(false); return; }
       project.disabled = true; projectStatus.textContent = "正在克隆项目…";
-      send.disabled = true;
-      try { const res = await fetch("/api/github/workspace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo: requestedRepo, ref: repoRefs.get(requestedRepo) || "main" }) }); if (!res.ok) throw new Error(await errorText(res)); const out = await res.json(); selectedRepo = out.repo; pr.hidden = true; lastResult = null; previewRequest++; filePreview.hidden = true; showPullRequest(""); fileSearch.value = ""; fileLimit = 80; updateWorkspaceFiles(out.files || []); updateFiles([]); diff.textContent = "任务完成后显示变更"; messages.replaceChildren(empty); empty.hidden = false; projectStatus.textContent = `${out.repo} 已准备好，可以描述修改。`; setPanel("center"); }
-      catch (err) { projectStatus.textContent = err.message; project.value = selectedRepo; }
-      finally { project.disabled = false; send.disabled = false; }
+      send.disabled = true; repoList.querySelectorAll("button").forEach((button) => button.disabled = true); connectionStatus.textContent = t("Opening {repo}…", { repo: requestedRepo });
+      try {
+        const res = await request("/api/github/workspace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo: requestedRepo, ref: repoRefs.get(requestedRepo) || "main" }) }, 120000);
+        if (!res.ok) throw new Error(await errorText(res));
+        const out = await res.json();
+        pr.hidden = true; lastResult = null; previewRequest++; filePreviewPath.textContent = ""; showPullRequest(""); fileSearch.value = ""; fileLimit = 80; updateFiles([]); diff.textContent = t("No project code changes yet"); messages.replaceChildren(empty); empty.hidden = false;
+        openWorkspace(out);
+      } catch (err) { projectStatus.textContent = err.message; connectionStatus.textContent = err.message; }
+      finally { project.disabled = false; send.disabled = false; repoList.querySelectorAll("button").forEach((button) => button.disabled = false); }
     };
     form.onsubmit = async (event) => {
       event.preventDefault(); const text = input.value.trim();
-      if (!text || !model.value || !selectedRepo || controller || project.disabled) { if (!selectedRepo) projectStatus.textContent = "请先选择 GitHub 项目。"; return; }
+      if (!text || !model.value || !selectedRepo || controller || project.disabled) { if (!selectedRepo) projectStatus.textContent = "请先选择 GitHub 项目。"; else if (!model.value) projectStatus.textContent = t("Configure an available model in EveryAPI settings first."); return; }
       input.value = ""; lastPrompt = text; bubble("user", text);
-      activity.hidden = true; activityLog.textContent = ""; previewRequest++; filePreview.hidden = true;
+      activity.hidden = true; activityLog.textContent = "";
       controller = new AbortController(); busy(true);
       try {
-        const res = await fetch("/api/github/agent", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ model: model.value, prompt: text }), signal: controller.signal });
+        const res = await request("/api/github/agent", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ model: model.value, prompt: text }), signal: controller.signal });
         if (!res.ok) throw new Error(await errorText(res));
         if (res.status === 202) await waitForAgent();
         else showResult(await res.json());
@@ -514,11 +634,11 @@ magpie.plugin("sessions", (ctx) => {
     pr.onclick = async () => {
       if (!lastResult?.files?.length) return;
       pr.disabled = true; projectStatus.textContent = "正在创建 Pull Request…";
-      try { const res = await fetch("/api/github/pull-request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: lastPrompt.slice(0, 72), body: lastPrompt }) }); if (!res.ok) throw new Error(await errorText(res)); const out = await res.json(); projectStatus.textContent = "Pull Request 已创建。"; showPullRequest(out.html_url); pr.hidden = true; } catch (err) { projectStatus.textContent = err.message; } finally { pr.disabled = false; }
+      try { const res = await request("/api/github/pull-request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: lastPrompt.slice(0, 72), body: lastPrompt }) }); if (!res.ok) throw new Error(await errorText(res)); const out = await res.json(); projectStatus.textContent = "Pull Request 已创建。"; showPullRequest(out.html_url); pr.hidden = true; } catch (err) { projectStatus.textContent = err.message; } finally { pr.disabled = false; }
     };
     input.oninput = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 180) + "px"; };
     mobileTabs.querySelectorAll("button").forEach((tab) => tab.onclick = () => setPanel(tab.dataset.panel));
-    setPanel("center");
+    setPanel("review");
   }
 
   function draw() {

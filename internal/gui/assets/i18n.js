@@ -4,6 +4,13 @@
 // works. {name} slots are filled by t(str, vars).
 const I18N = {
   zh: {
+    "Client ID": "客户端 ID",
+    "Add a project": "添加项目",
+    "Leave blank to keep the saved key": "留空以保留已保存的密钥",
+    "Configure your EveryAPI API key, then refresh the model list.": "配置 EveryAPI API 密钥，然后刷新模型列表。",
+    "Select the models exposed by this gateway.": "选择此网关提供的模型。",
+    "Save and refresh models": "保存并刷新模型",
+
     "Install app": "安装应用",
     "Open the gateway over HTTPS to enable full app installation.": "通过 HTTPS 打开网关，以启用完整的应用安装功能。",
     "In Safari, tap Share, then Add to Home Screen. Open the saved icon to use the gateway as an app.": "在 Safari 中点“分享”，再选“添加到主屏幕”。以后点桌面图标即可打开网关。",
@@ -3978,6 +3985,13 @@ const I18N = {
     "Where": "位置",
   },
   "zh-TW": {
+    "Client ID": "用戶端 ID",
+    "Add a project": "新增專案",
+    "Leave blank to keep the saved key": "留空以保留已儲存的金鑰",
+    "Configure your EveryAPI API key, then refresh the model list.": "設定 EveryAPI API 金鑰，然後重新整理模型清單。",
+    "Select the models exposed by this gateway.": "選擇此閘道提供的模型。",
+    "Save and refresh models": "儲存並重新整理模型",
+
     "Install app": "安裝應用程式",
     "Open the gateway over HTTPS to enable full app installation.": "請透過 HTTPS 開啟閘道，以啟用完整的應用程式安裝功能。",
     "In Safari, tap Share, then Add to Home Screen. Open the saved icon to use the gateway as an app.": "在 Safari 中點選「分享」，再選「加入主畫面」。之後點選桌面圖示即可開啟閘道。",
@@ -7937,6 +7951,13 @@ const I18N = {
     "Where": "位置",
   },
   ja: {
+    "Client ID": "クライアント ID",
+    "Add a project": "プロジェクトを追加",
+    "Leave blank to keep the saved key": "空欄で保存済みキーを維持",
+    "Configure your EveryAPI API key, then refresh the model list.": "EveryAPI API キーを設定してモデル一覧を更新してください。",
+    "Select the models exposed by this gateway.": "このゲートウェイで提供するモデルを選択してください。",
+    "Save and refresh models": "保存してモデルを更新",
+
     "Install app": "アプリをインストール",
     "Open the gateway over HTTPS to enable full app installation.": "アプリのインストール機能を有効にするには、HTTPS でゲートウェイを開いてください。",
     "In Safari, tap Share, then Add to Home Screen. Open the saved icon to use the gateway as an app.": "Safari の「共有」から「ホーム画面に追加」を選びます。追加したアイコンからゲートウェイをアプリとして開けます。",
@@ -11898,6 +11919,13 @@ const I18N = {
     "Where": "場所",
   },
   de: {
+    "Client ID": "Client-ID",
+    "Add a project": "Projekt hinzufügen",
+    "Leave blank to keep the saved key": "Leer lassen, um den gespeicherten Schlüssel zu behalten",
+    "Configure your EveryAPI API key, then refresh the model list.": "EveryAPI-API-Schlüssel konfigurieren und die Modellliste aktualisieren.",
+    "Select the models exposed by this gateway.": "Wähle die über dieses Gateway verfügbaren Modelle.",
+    "Save and refresh models": "Speichern und Modelle aktualisieren",
+
     "Install app": "App installieren",
     "Open the gateway over HTTPS to enable full app installation.": "Öffnen Sie das Gateway über HTTPS, um die vollständige App-Installation zu ermöglichen.",
     "In Safari, tap Share, then Add to Home Screen. Open the saved icon to use the gateway as an app.": "Tippen Sie in Safari auf „Teilen“ und dann auf „Zum Home-Bildschirm“. Öffnen Sie das gespeicherte Symbol, um das Gateway als App zu nutzen.",

@@ -168,70 +168,121 @@ body.window .row.sm-sub-row { min-height: 42px; padding-left: calc(14px + var(--
   .sm-subs { --sub-step: 10px; padding-left: calc(12px + var(--sub-depth, 0) * var(--sub-step)); padding-right: 8px; }
 }
 
-/* EveryAPI project workbench */
-.everyapi-workbench { padding: 20px 24px 24px; gap: 14px; background: var(--bg); }
-.everyapi-chat-title { min-height: 34px; gap: 10px; }
-.everyapi-title-mark { color: var(--accent); font: 700 10px/1 var(--code-font, monospace); letter-spacing: .14em; }
-.everyapi-title-sub { color: var(--muted); font-size: 12px; }
+/* EveryAPI project workspace */
+#view-sessions.everyapi-workbench { padding: 0; gap: 0; background: var(--bg); min-width: 0; overflow: hidden; }
+.everyapi-workbench [hidden] { display: none !important; }
+.everyapi-workbench button { font: inherit; cursor: pointer; }
+.everyapi-workbench button:disabled { cursor: wait; opacity: .55; }
+.everyapi-project-chooser { flex: 1; min-height: 0; width: min(880px, 100%); margin: 0 auto; padding: clamp(24px, 6vh, 64px) 32px 24px; overflow: auto; }
+.everyapi-chooser-header h1 { margin: 0 0 12px; font-size: 28px; font-weight: 650; letter-spacing: -.03em; }
+.everyapi-chooser-header p { margin: 0; color: var(--muted); line-height: 1.7; font-size: 14px; }
+.everyapi-chooser-actions { display: flex; gap: 14px; align-items: center; margin: 28px 0 18px; }
+.everyapi-connection-status { min-width: 0; flex: 1; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.everyapi-repo-retry, .everyapi-repo-back { border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; background: var(--card); color: var(--fg); }
+.everyapi-repo-search { width: 100%; border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; background: var(--card); color: var(--fg); font: inherit; margin-bottom: 18px; }
+.everyapi-repo-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.everyapi-repo-card { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; min-height: 142px; text-align: left; padding: 20px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--fg); }
+.everyapi-repo-card:hover, .everyapi-repo-card:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
+.everyapi-repo-card strong { font-size: 14px; overflow-wrap: anywhere; }
+.everyapi-repo-description { color: var(--muted); font-size: 12px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.everyapi-repo-meta { margin-top: auto; color: var(--muted); font-size: 11px; }
+.everyapi-repo-empty, .everyapi-repo-error { grid-column: 1 / -1; padding: 16px; line-height: 1.7; border-radius: 9px; background: var(--card); color: var(--muted); overflow-wrap: anywhere; }
+.everyapi-repo-error { color: var(--red); }
+.everyapi-project-chooser .everyapi-project-row { margin: 12px 0 20px; }
+.everyapi-project-chooser .everyapi-project-auth { display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; background: var(--accent); color: #fff; font-weight: 600; }
+.everyapi-chat-title { min-height: 52px; gap: 12px; padding: 8px 18px; border-bottom: 1px solid var(--line-2); background: var(--card); }
+.everyapi-chat-title .everyapi-project-select { width: auto; flex: 0 1 auto; max-width: 65%; height: auto; min-height: 32px; border: 0; background: transparent; padding: 4px 0; font-size: 14px; font-weight: 650; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.everyapi-chat-title .everyapi-project-select::after { content: ' ▾'; color: var(--muted); }
+.everyapi-repo-ref { font: 11px var(--code-font, monospace); color: var(--muted); padding: 4px 8px; background: var(--pill); border-radius: 5px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.everyapi-task-toggle { margin-left: auto; flex: none; border: 1px solid var(--line); border-radius: 7px; background: var(--card); color: var(--fg); padding: 6px 10px; }
 .everyapi-workbench-tabs { display: none; }
-.everyapi-workbench-grid { display: grid; grid-template-columns: minmax(190px, 240px) minmax(380px, 1fr) minmax(300px, 420px); gap: 14px; min-height: 0; flex: 1; }
-.everyapi-workbench-project, .everyapi-workbench-center, .everyapi-workbench-review { min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--card); }
-.everyapi-workbench-grid > * { min-width: 0; }
-.everyapi-workbench-project { overflow: auto; }
-.everyapi-workbench-center { overflow: hidden; }
-.everyapi-workbench-review { overflow: hidden; }
-.everyapi-panel-label { flex: none; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.everyapi-project-row { flex-wrap: wrap; }
-.everyapi-project-select { flex-basis: 100%; order: -1; }
-.everyapi-project-status { padding: 10px; border-radius: 9px; background: var(--bg); line-height: 1.5; }
-.everyapi-project-files, .everyapi-changed-files { min-height: 42px; max-height: 260px; overflow: auto; padding: 4px 0; }
-.everyapi-project-files { flex: 1; max-height: none; }
-.everyapi-workspace-file, .everyapi-file-row { display: block; width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; padding: 8px; border-radius: 6px; color: var(--fg-2); font: 12px/1.35 var(--code-font, monospace); overflow-wrap: anywhere; }
-.everyapi-file-search { width: 100%; min-width: 0; min-height: 38px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
-.everyapi-file-preview { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
-.everyapi-file-preview[hidden] { display: none; }
-.everyapi-file-preview-title { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.everyapi-file-preview-title strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.everyapi-file-preview-title button { flex: none; padding: 6px; border: 0; border-radius: 6px; color: var(--fg); background: var(--pill); cursor: pointer; }
-.everyapi-file-content { min-height: 150px; overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); color: var(--fg); font: 12px/1.6 var(--code-font, monospace); tab-size: 2; }
-.everyapi-chat-empty strong { color: var(--fg); font-size: 17px; }
-.everyapi-chat-empty p { max-width: 330px; line-height: 1.7; }
-.everyapi-choose-project { min-height: 44px; padding: 8px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; font: inherit; }
-.everyapi-workspace-file:hover, .everyapi-file-row:hover { background: var(--pill); }
-.everyapi-workspace-more, .everyapi-review-hint { padding: 7px 8px; color: var(--muted); font-size: 11px; }
-.everyapi-workbench-review .everyapi-project-diff { flex: 1; min-height: 180px; max-height: none; }
-.everyapi-workbench-review .everyapi-project-pr { width: 100%; min-height: 44px; }
+.everyapi-workbench-grid { display: grid; grid-template-columns: 210px minmax(0, 1fr) 340px; min-height: 0; flex: 1; background: var(--card); }
+.everyapi-workbench-grid > * { min-width: 0; min-height: 0; }
+.everyapi-workbench-project, .everyapi-workbench-center, .everyapi-workbench-review { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 0; border-radius: 0; background: var(--card); overflow: hidden; }
+.everyapi-workbench-project { background: var(--bg); border-right: 1px solid var(--line-2); }
+.everyapi-workbench-center { border-left: 1px solid var(--line-2); }
+.everyapi-workbench-review { padding: 0; gap: 0; }
+.everyapi-workbench-grid[data-task-open="false"] { grid-template-columns: 210px minmax(0, 1fr); }
+.everyapi-workbench-grid[data-task-open="false"] .everyapi-workbench-center { display: none; }
+.everyapi-panel-label { flex: none; color: var(--muted); font-size: 11px; font-weight: 600; }
+.everyapi-file-search { width: 100%; min-width: 0; min-height: 34px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); font: inherit; font-size: 12px; }
+.everyapi-project-files { flex: 1; min-height: 0; overflow: auto; padding: 0; }
+.everyapi-workspace-file, .everyapi-file-row { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 8px 6px; border-radius: 5px; color: var(--fg-2); font: 12px/1.5 var(--code-font, monospace) !important; overflow-wrap: anywhere; }
+.everyapi-workspace-file:hover, .everyapi-workspace-file.on, .everyapi-file-row:hover { background: var(--pill); color: var(--fg); }
+.everyapi-workspace-more { padding: 8px 6px; color: var(--accent); border: 0; background: transparent; font-size: 11px; }
+.everyapi-code-tabs { flex: none; min-height: 44px; display: flex; align-items: stretch; gap: 20px; padding: 0 18px; border-bottom: 1px solid var(--line-2); background: var(--bg); }
+.everyapi-code-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); background: transparent; padding: 0 2px; font-size: 12px; }
+.everyapi-code-tabs button.on { border-bottom-color: var(--accent); color: var(--fg); }
+.everyapi-code-empty { margin: auto; padding: 28px; color: var(--muted); font-size: 13px; }
+.everyapi-file-preview { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.everyapi-file-preview-title { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line-2); font: 12px/1.5 var(--code-font, monospace); }
+.everyapi-file-preview-title strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
+.everyapi-file-preview-title button { flex: none; border: 0; background: transparent; color: var(--muted); font-size: 11px; }
+.everyapi-file-content { min-height: 0; flex: 1; overflow: auto; margin: 0; padding: 16px 0; border: 0; background: var(--card); color: var(--fg-2); font: 12px/1.85 var(--code-font, monospace); tab-size: 2; white-space: pre; }
+.everyapi-code-line { display: flex; min-width: max-content; padding-right: 24px; }
+.everyapi-line-number { min-width: 52px; padding: 0 16px 0 10px; text-align: right; color: var(--faint); user-select: none; flex: none; }
+.everyapi-line-text { white-space: pre; }
+.everyapi-review-hint { margin: 0; padding: 10px 16px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.everyapi-review-area { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px; overflow: hidden; }
+.everyapi-changed-files { flex: none; max-height: 150px; overflow: auto; }
+.everyapi-workbench-review .everyapi-project-diff { flex: 1; min-height: 0; max-height: none; padding: 12px 0; border: 1px solid var(--line-2); border-radius: 6px; background: var(--card); white-space: pre; font: 12px/1.8 var(--code-font, monospace); }
+.everyapi-diff-line { display: block; min-width: max-content; padding: 0 14px; }
+.everyapi-diff-line.add { background: color-mix(in srgb, var(--green) 10%, transparent); color: var(--green); }
+.everyapi-diff-line.remove { background: var(--red-soft); color: var(--red); }
+.everyapi-diff-line.hunk { color: var(--accent); background: var(--accent-soft); }
+.everyapi-review-area .everyapi-review-hint { padding: 0; }
 .everyapi-project-pr-link { display: flex; }
-.everyapi-project-pr-link .everyapi-project-auth { flex: 1; display: inline-flex; align-items: center; justify-content: center; }
-.everyapi-diff-label { margin-top: 6px; }
-.everyapi-chat-messages { border: 0; padding: 8px 2px; background: transparent; }
+.everyapi-project-pr-link a, .everyapi-project-pr { width: 100%; display: inline-flex; align-items: center; justify-content: center; min-height: 42px; }
 .everyapi-task-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 28px; }
-.everyapi-task-stop { border: 1px solid var(--line); border-radius: 7px; background: var(--card); color: var(--fg); padding: 6px 10px; cursor: pointer; font: inherit; }
-.everyapi-task-activity { flex: none; font: 12px/1.6 var(--code-font, monospace); padding: 8px; border-radius: 8px; background: var(--bg); color: var(--muted); overflow-wrap: anywhere; }
+.everyapi-task-stop { border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--fg); padding: 5px 8px; font-size: 12px; }
+.everyapi-task-activity { flex: none; font: 11px/1.7 var(--code-font, monospace); padding: 8px; border-radius: 6px; background: var(--bg); color: var(--muted); overflow-wrap: anywhere; }
 .everyapi-task-activity summary { cursor: pointer; }
 .everyapi-task-activity pre { max-height: 140px; overflow: auto; white-space: pre-wrap; margin: 8px 0 0; font: inherit; }
-.everyapi-chat-form { grid-template-columns: 150px minmax(0, 1fr) auto; }
-.everyapi-chat-form .everyapi-chat-model { grid-column: auto; }
-.everyapi-chat-send { width: auto; min-width: 64px; padding: 0 16px; font-size: 14px; }
-@media (max-width: 1100px) {
-  .everyapi-workbench { padding: 14px; }
-  .everyapi-workbench-grid { grid-template-columns: minmax(160px, 200px) minmax(300px, 1fr); }
-  .everyapi-workbench-review { grid-column: 1 / -1; min-height: 260px; }
+.everyapi-chat-messages { border: 0; border-radius: 0; padding: 0; background: transparent; gap: 18px; min-height: 0; }
+.everyapi-chat-msg { width: 100%; max-width: 100%; padding: 12px; border-radius: 8px; line-height: 1.8; font-size: 13px; }
+.everyapi-chat-msg.user { align-self: stretch; background: var(--bg); }
+.everyapi-chat-msg.assistant { align-self: stretch; border: 0; background: transparent; padding: 0; }
+.everyapi-message-body { white-space: normal; line-height: 1.75; }
+.everyapi-message-body .wn-notes { font: inherit; color: inherit; }
+.everyapi-message-body .wn-h { margin: 14px 0 6px; font-size: 14px; font-weight: 650; }
+.everyapi-message-body p { margin: 8px 0; }
+.everyapi-message-body ul { margin: 8px 0; padding-left: 20px; }
+.everyapi-message-body code { font: 12px var(--code-font, monospace); background: var(--pill); padding: 2px 4px; border-radius: 4px; }
+.everyapi-message-body pre { overflow: auto; padding: 12px; border-radius: 7px; background: var(--bg); white-space: pre; font: 12px/1.65 var(--code-font, monospace); }
+.everyapi-chat-empty { margin: auto 0; padding: 8px; text-align: left; font-size: 13px; line-height: 1.8; }
+.everyapi-chat-empty strong { color: var(--fg); font-size: 17px; font-weight: 600; }
+.everyapi-chat-empty p { color: var(--muted); }
+.everyapi-task-suggestions { display: flex; flex-wrap: wrap; gap: 6px; }
+.everyapi-task-suggestions button { border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; background: var(--card); color: var(--fg-2); font-size: 12px; }
+.everyapi-chat-form { grid-template-columns: minmax(0, 1fr) auto; padding: 10px; gap: 8px; background: var(--card); border-radius: 9px; }
+.everyapi-chat-form .everyapi-chat-input { grid-column: 1 / -1; grid-row: 1; min-height: 72px; font-size: 16px; }
+.everyapi-chat-form .everyapi-chat-model { grid-column: 1; grid-row: 2; border: 0; padding: 0; font-size: 11px; height: 32px; background: transparent; }
+.everyapi-chat-send { grid-column: 2; grid-row: 2; min-width: 52px; width: auto; height: 32px; padding: 0 12px; border-radius: 6px; font-size: 12px; }
+.everyapi-project-status { flex: none; min-height: 30px; padding: 7px 16px; background: var(--bg); border-top: 1px solid var(--line-2); font-size: 11px; line-height: 1.5; }
+.everyapi-workbench[data-open-project="false"] .everyapi-project-status { background: transparent; border: 0; padding: 12px 24px; }
+@media (max-width: 1100px) and (min-width: 641px) {
+  .everyapi-workbench-grid { grid-template-columns: 170px minmax(0, 1fr) 300px; }
+  .everyapi-workbench-grid[data-task-open="false"] { grid-template-columns: 170px minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
-  .everyapi-workbench { padding: 10px; gap: 10px; }
-  .everyapi-title-sub { display: none; }
-  .everyapi-workbench-tabs { display: flex; gap: 5px; padding: 3px; border-radius: 9px; background: var(--pill); }
-  .everyapi-workbench-tabs button { flex: 1; min-height: 36px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; }
-  .everyapi-workbench-tabs button.on { background: var(--card); color: var(--fg); box-shadow: 0 1px 3px #0002; }
-  .everyapi-workbench-grid { display: block; }
-  .everyapi-workbench-project, .everyapi-workbench-center, .everyapi-workbench-review { display: none; min-height: 0; height: 100%; padding: 11px; }
+  .everyapi-project-chooser { padding: 28px 18px; }
+  .everyapi-chooser-header h1 { font-size: 25px; }
+  .everyapi-chooser-header p { font-size: 13px; }
+  .everyapi-repo-list { grid-template-columns: 1fr; }
+  .everyapi-repo-card { min-height: 122px; padding: 16px; }
+  .everyapi-repo-search, .everyapi-file-search { font-size: 16px; min-height: 44px; }
+  .everyapi-chat-title { min-height: 48px; padding: 8px 14px; gap: 8px; }
+  .everyapi-chat-title .everyapi-project-select { flex: 1; max-width: none; font-size: 13px; }
+  .everyapi-task-toggle { display: none; }
+  .everyapi-workbench-tabs { display: flex; flex: none; gap: 0; border-bottom: 1px solid var(--line-2); background: var(--card); }
+  .everyapi-workbench-tabs button { flex: 1; min-height: 42px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); font-size: 13px; }
+  .everyapi-workbench-tabs button.on { border-bottom-color: var(--accent); color: var(--fg); }
+  .everyapi-workbench-grid, .everyapi-workbench-grid[data-task-open="false"] { display: flex; flex-direction: column; }
+  .everyapi-workbench-grid .everyapi-workbench-project, .everyapi-workbench-grid .everyapi-workbench-center, .everyapi-workbench-grid .everyapi-workbench-review { display: none; min-height: 0; flex: 1; height: auto; border: 0; }
   .everyapi-workbench-grid[data-mobile-panel="project"] .everyapi-workbench-project, .everyapi-workbench-grid[data-mobile-panel="center"] .everyapi-workbench-center, .everyapi-workbench-grid[data-mobile-panel="review"] .everyapi-workbench-review { display: flex; }
-  .everyapi-workbench-center { min-height: 0; }
-  .everyapi-workbench-review .everyapi-project-diff { min-height: 260px; }
-  .everyapi-chat-form { grid-template-columns: 1fr auto; }
-  .everyapi-chat-form .everyapi-chat-model { grid-column: 1 / -1; }
-  .everyapi-project-auth, .everyapi-github-config-edit { flex: 1; }
-  .everyapi-file-search { font-size: 16px; min-height: 44px; }
   .everyapi-workspace-file, .everyapi-file-row { min-height: 44px; }
+  .everyapi-chat-form .everyapi-chat-input { font-size: 16px; }
+  .everyapi-chat-form .everyapi-chat-model { font-size: 16px; }
+  .everyapi-line-number { min-width: 42px; padding-right: 10px; }
+  .everyapi-project-status { padding: 6px 12px max(6px, env(safe-area-inset-bottom)); font-size: 10px; }
 }

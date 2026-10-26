@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 
 module.exports = async function projects(browser, desktop, address) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce', serviceWorkers: 'block' });
-  let selected = false, running = false, done = false, clones = 0, prs = 0;
+  let selected = false, running = false, done = false, clones = 0, prs = 0, authorized = false, failRepos = false;
   const prompt = 'Update the project documentation.';
   const repo = 'everyapi-ai/example';
-  const result = { message: 'Updated documentation.', files: ['README.md'], diff: 'diff --git a/README.md b/README.md\n+Updated documentation.\n' };
+  const result = { message: '## Updated documentation\n\n- Reviewed **README.md**.\n\n```js\nconst safe = "<script>";\n```\n\n<img src=x onerror=alert(1)>', files: ['README.md'], diff: 'diff --git a/README.md b/README.md\n+Updated documentation.\n' };
   const errors = [];
   const requests = [];
   let page;
@@ -19,7 +19,10 @@ module.exports = async function projects(browser, desktop, address) {
       const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
       switch (url.pathname) {
         case '/api/github/status': return json({ configured: true, managed: true, organization: 'everyapi-ai', callback_url: address + '/_github/callback' });
-        case '/api/github/repos': return json({ repos: [{ full_name: repo, default_branch: 'main' }] });
+        case '/api/github/repos':
+          if (!authorized) return json({ error: 'Authorization required' }, 401);
+          if (failRepos) return json({ error: 'Repository service unavailable' }, 502);
+          return json({ user: 'fixture-user', repos: [{ full_name: repo, default_branch: 'main', description: 'Project documentation and source code.' }] });
         case '/api/github/workspace':
           if (request.method() === 'POST') { selected = true; clones++; }
           return json({ selected, repo, ref: 'main', files: ['README.md', 'src/index.js'], running, prompt: running || done ? prompt : '', result: done ? result : null });
@@ -36,38 +39,52 @@ module.exports = async function projects(browser, desktop, address) {
     page = await context.newPage();
     page.setDefaultTimeout(10000);
     page.on('pageerror', err => errors.push(err.message));
-    await page.goto(address + '/settings?view=sessions', { waitUntil: 'domcontentloaded' });
-    await page.locator('.everyapi-choose-project').waitFor();
-    await page.waitForFunction(() => document.querySelector('.everyapi-project-select')?.options.length === 2);
-    assert.equal(await page.locator('.everyapi-project-select').inputValue(), '', 'first repository looked selected without cloning');
+    await page.goto(address + '/settings?view=sessions', { waitUntil: 'commit' });
+    await page.locator('.everyapi-project-chooser .everyapi-project-auth').waitFor();
+    assert.equal(await page.locator('.everyapi-project-chooser .everyapi-project-auth').getAttribute('href'), '/_github/start');
+    assert.equal(await page.locator('.everyapi-workbench-grid').isVisible(), false, 'empty editor panels appear before connecting GitHub');
+    authorized = true; failRepos = true;
+    await page.locator('.everyapi-repo-retry').tap();
+    await page.locator('.everyapi-repo-error').filter({ hasText: 'Repository service unavailable' }).waitFor();
+    failRepos = false;
+    await page.locator('.everyapi-repo-retry').tap();
+    await page.locator('.everyapi-repo-card').waitFor();
+    assert.equal(clones, 0, 'listing repositories silently cloned the first one');
     assert.equal(await page.locator('.everyapi-github-config-edit').isVisible(), false, 'Vault credentials can be overwritten from a misleading form');
     assert.equal(await page.locator('.everyapi-chat-form .everyapi-chat-model').count(), 1, 'model picker is outside the composer');
     assert.equal(await page.locator('#nav [data-view=providers]').isVisible(), false, 'phone exposes the EveryAPI settings tab');
-    await page.locator('.everyapi-workbench-tabs button[data-panel="project"]').tap();
-    await page.locator('.everyapi-project-select').selectOption(repo);
+    await page.locator('.everyapi-repo-search').fill('missing');
+    assert.equal(await page.locator('.everyapi-repo-card').count(), 0);
+    await page.locator('.everyapi-repo-search').fill('example');
+    await page.locator('.everyapi-repo-card').tap();
     await page.waitForFunction(() => document.querySelector('.everyapi-project-status')?.textContent.includes('已准备好'));
     assert.equal(clones, 1, 'selecting the only repository did not clone it once');
+    await page.locator('.everyapi-file-preview-title strong').filter({ hasText: 'README.md' }).waitFor();
+    await page.locator('.everyapi-file-content').filter({ hasText: '# Project documentation' }).waitFor();
     await page.locator('.everyapi-workbench-tabs button[data-panel="project"]').tap();
     await page.locator('.everyapi-file-search').fill('readme');
     assert.equal(await page.locator('.everyapi-workspace-file').count(), 1);
     await page.locator('.everyapi-workspace-file').tap();
     await page.locator('.everyapi-file-content').filter({ hasText: '# Project documentation' }).waitFor();
-    await page.getByRole('button', { name: '关闭文件', exact: true }).tap();
+    await page.locator('.everyapi-file-preview-title button').tap();
     await page.locator('.everyapi-workbench-tabs button[data-panel="center"]').tap();
     await page.locator('.everyapi-chat-input').fill(prompt);
     await page.locator('.everyapi-chat-send').tap();
     await page.waitForFunction(() => document.querySelector('.everyapi-chat-input')?.disabled);
     await page.locator('.everyapi-task-activity summary').filter({ hasText: 'read_file README.md' }).waitFor();
-    assert(await page.getByRole('button', { name: '停止任务', exact: true }).isVisible(), 'running task has no stop control');
+    assert(await page.locator('.everyapi-task-stop').isVisible(), 'running task has no stop control');
     await page.reload();
     await page.locator('.everyapi-workbench-tabs button[data-panel="center"]').tap();
-    await page.waitForFunction(() => document.querySelector('.everyapi-chat-input')?.disabled && document.querySelector('.everyapi-project-select')?.value === 'everyapi-ai/example');
+    await page.waitForFunction(() => document.querySelector('.everyapi-chat-input')?.disabled && document.querySelector('.everyapi-project-select')?.textContent === 'everyapi-ai/example');
     done = true;
     await page.locator('.everyapi-workbench-tabs button[data-panel="review"]').tap();
     await page.locator('.everyapi-project-diff').waitFor();
     await page.waitForFunction(() => !document.querySelector('.everyapi-chat-input').disabled);
     assert.equal(clones, 1, 'refresh cloned the repository and lost the workspace');
     assert.match(await page.locator('.everyapi-chat-messages').textContent(), /Updated documentation/);
+    assert.equal(await page.locator('.everyapi-message-body pre').textContent(), 'const safe = "<script>";');
+    assert.equal(await page.locator('.everyapi-message-body ul li b').textContent(), 'README.md');
+    assert.equal(await page.locator('.everyapi-message-body img,.everyapi-message-body script').count(), 0, 'model response can inject HTML');
     await page.locator('#nav [data-view=usage]').tap();
     await page.locator('#nav [data-view=sessions]').tap();
     await page.locator('.everyapi-workbench-tabs button[data-panel="review"]').tap();
@@ -88,9 +105,14 @@ module.exports = async function projects(browser, desktop, address) {
     assert(panels[0].right <= panels[1].x && panels[1].right <= panels[2].x && panels.every(panel => panel.y === panels[0].y), 'desktop workspace columns overlap or wrap');
     const composer = await page.locator('.everyapi-chat-form').evaluate(node => ({ bottom: node.getBoundingClientRect().bottom, viewport: innerHeight }));
     assert(composer.bottom <= composer.viewport, `desktop composer falls below viewport: ${JSON.stringify(composer)}`);
+    await page.locator('.everyapi-task-toggle').click();
+    assert.equal(await page.locator('.everyapi-workbench-center').isVisible(), false, 'task panel cannot be collapsed');
+    const editor = await page.locator('.everyapi-workbench-review').boundingBox();
+    assert(editor.width > 600, 'collapsing tasks did not give space back to the code');
+    await page.locator('.everyapi-task-toggle').click();
     if (process.env.WORKBENCH_SCREENSHOTS) await page.screenshot({ path: 'dist/workbench-desktop.png', fullPage: true });
     assert.deepEqual(errors, []);
-    console.log('PASS: desktop workspace columns, phone initial task panel, file search/preview, Sessions selection, composer model, task polling/recovery, review and PR retry (API fixtures)');
+    console.log('PASS: direct GitHub connect, repository error/retry and search, no empty panes before selection, auto-open README, file search/preview, code-first desktop and collapsible tasks, phone panels, task recovery and PR retry (API fixtures)');
   } catch (error) {
     console.error('Project fixture diagnostics:', { requests, errors, url: page?.url(), text: page ? (await page.locator('body').innerText()).slice(0, 1600) : '' });
     throw error;

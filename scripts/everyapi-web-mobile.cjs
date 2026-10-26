@@ -72,7 +72,7 @@ module.exports = async function mobile(browser, address, admin, client, upstream
         await page.locator('dialog.everyapi-install button').tap();
         await page.locator('dialog.everyapi-install').waitFor({ state: 'detached' });
         if (width <= 560) assert.equal(await page.locator('#nav [data-view=providers]').isVisible(), false, 'EveryAPI configuration tab is visible on a phone');
-        await page.locator('.everyapi-chat-form').waitFor();
+        await page.locator('.everyapi-project-chooser').waitFor();
         await fits(page, '#view-sessions');
         assert(await page.locator('.everyapi-chat-input').evaluate(node => parseFloat(getComputedStyle(node).fontSize) >= 16));
         assert.equal(await page.locator('#addProvider').isVisible(), false);
