@@ -6,6 +6,7 @@
 .everyapi-project-row { display: flex; align-items: center; gap: 8px; flex: none; }
 .everyapi-project-select { flex: 1; min-width: 0; height: 38px; border: 1px solid var(--line); border-radius: 9px; padding: 0 9px; background: var(--card); color: var(--fg); font: inherit; }
 .everyapi-project-auth, .everyapi-project-pr { flex: none; min-height: 38px; padding: 0 11px; border-radius: 9px; background: var(--pill); color: var(--fg); text-decoration: none; font: inherit; cursor: pointer; }
+.everyapi-github-config-edit { flex: none; min-height: 38px; padding: 0 11px; border: 0; border-radius: 9px; background: var(--pill); color: var(--fg); font: inherit; cursor: pointer; }
 .everyapi-project-pr { background: var(--accent); color: #fff; border: 0; }
 .everyapi-github-config { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: center; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 .everyapi-github-config strong, .everyapi-github-config-hint { grid-column: 1 / -1; }
