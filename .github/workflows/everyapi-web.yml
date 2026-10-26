@@ -20,7 +20,9 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/everyapi-web-gateway
+  # Keep the package name equal to the source repository so GitHub grants this
+  # repository's GITHUB_TOKEN write access when the package is first created.
+  IMAGE: ghcr.io/${{ github.repository_owner }}/everyapi-gateway
 
 jobs:
   build-test-push:
