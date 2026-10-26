@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yetone/magpie/internal/access"
 	"github.com/yetone/magpie/internal/settings"
 )
 
@@ -365,6 +366,14 @@ func runGitHubAgent(ctx context.Context, root, model, prompt string) (map[string
 		body := map[string]any{"model": model, "messages": messages, "tools": tools, "tool_choice": "auto", "stream": false}
 		b, _ := json.Marshal(body)
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(b)).WithContext(ctx)
+		// The standalone distribution requires an issued client key even on
+		// loopback. This request never leaves the process, so give it a
+		// bounded internal identity instead of reading a user's key from disk
+		// or making the GitHub workflow depend on a revocable client key.
+		req = req.WithContext(access.WithIdentity(req.Context(), access.Identity{
+			KeyID:   "everyapi-github-agent",
+			KeyName: "EveryAPI GitHub Agent",
+		}))
 		rec := httptest.NewRecorder()
 		gw := served.Load()
 		if gw == nil {
