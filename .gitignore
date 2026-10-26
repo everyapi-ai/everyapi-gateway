@@ -10,3 +10,5 @@
 /.env.everyapi
 !/.env.everyapi.example
 /.everyapi-data/
+/github-oauth.json
+/.github-oauth-*
