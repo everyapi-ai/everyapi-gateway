@@ -255,7 +255,7 @@ magpie.plugin("sessions", (ctx) => {
     const oauthTitle = el("strong", "", "配置 GitHub OAuth App");
     const oauthHint = el("span", "everyapi-github-config-hint", "回调地址必须是 https://gateway.everyapi.ai/_github/callback");
     const oauthCreate = el("a", "everyapi-github-config-link", "在 GitHub 创建 OAuth App");
-    oauthCreate.href = "https://github.com/settings/applications/new"; oauthCreate.target = "_blank"; oauthCreate.rel = "noopener noreferrer";
+    oauthCreate.href = "https://github.com/settings/applications/new?name=EveryAPI%20Gateway&url=https%3A%2F%2Fgateway.everyapi.ai&callback_url=https%3A%2F%2Fgateway.everyapi.ai%2F_github%2Fcallback"; oauthCreate.target = "_blank"; oauthCreate.rel = "noopener noreferrer";
     const oauthID = el("input", "everyapi-github-config-input");
     oauthID.type = "text"; oauthID.required = true; oauthID.autocomplete = "off"; oauthID.placeholder = "Client ID"; oauthID.setAttribute("aria-label", "GitHub Client ID");
     const oauthSecret = el("input", "everyapi-github-config-input");
