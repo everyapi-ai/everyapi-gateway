@@ -262,6 +262,7 @@ magpie.plugin("sessions", (ctx) => {
     form.append(input, send);
     page.append(title, projectRow, projectStatus, messages, form);
     let controller = null, selectedRepo = "", lastPrompt = "", lastResult = null;
+    const repoRefs = new Map();
     const bubble = (role, text, error = false) => {
       empty.hidden = true;
       const b = el("div", "everyapi-chat-msg " + (error ? "error" : role), text);
@@ -279,6 +280,7 @@ magpie.plugin("sessions", (ctx) => {
       if (res.status === 401) { project.replaceChildren(new Option("请先授权 GitHub", "")); auth.hidden = false; projectStatus.textContent = "请先授权 GitHub，授权后可选择组织内项目。"; return; }
       if (!res.ok) throw new Error(await errorText(res));
       const repos = (await res.json())?.repos || [];
+      repos.forEach((x) => repoRefs.set(x.full_name, x.default_branch || "main"));
       project.replaceChildren(...repos.map((x) => new Option((x.private ? "🔒 " : "") + x.full_name, x.full_name)));
       if (!repos.length) project.append(new Option("没有可访问的项目", ""));
       projectStatus.textContent = repos.length ? "选择项目后输入修改要求，EveryAPI 会读取并修改工作区。" : "当前 GitHub 账号没有可访问的项目。";
@@ -287,7 +289,7 @@ magpie.plugin("sessions", (ctx) => {
       selectedRepo = project.value; pr.hidden = true; lastResult = null;
       if (!selectedRepo) return;
       project.disabled = true; projectStatus.textContent = "正在克隆项目…";
-      try { const res = await fetch("/api/github/workspace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo: selectedRepo }) }); if (!res.ok) throw new Error(await errorText(res)); const out = await res.json(); projectStatus.textContent = `${out.repo} 已准备好，可以描述修改。`; }
+      try { const res = await fetch("/api/github/workspace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo: selectedRepo, ref: repoRefs.get(selectedRepo) || "main" }) }); if (!res.ok) throw new Error(await errorText(res)); const out = await res.json(); projectStatus.textContent = `${out.repo} 已准备好，可以描述修改。`; }
       catch (err) { projectStatus.textContent = err.message; project.value = ""; selectedRepo = ""; }
       finally { project.disabled = false; }
     };
