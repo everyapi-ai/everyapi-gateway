@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yetone/magpie/internal/access"
 	"github.com/yetone/magpie/internal/settings"
 )
 
@@ -370,10 +369,7 @@ func runGitHubAgent(ctx context.Context, root, model, prompt string) (map[string
 		// loopback. This request never leaves the process, so give it a
 		// bounded internal identity instead of reading a user's key from disk
 		// or making the GitHub workflow depend on a revocable client key.
-		req = req.WithContext(access.WithIdentity(req.Context(), access.Identity{
-			KeyID:   "everyapi-github-agent",
-			KeyName: "EveryAPI GitHub Agent",
-		}))
+		req = req.WithContext(internalGatewayContext(req.Context()))
 		rec := httptest.NewRecorder()
 		gw := served.Load()
 		if gw == nil {

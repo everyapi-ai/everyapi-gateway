@@ -36,6 +36,7 @@ func serveWebChatGateway(w http.ResponseWriter, r *http.Request, path string) {
 	clone.URL.Path = path
 	clone.URL.RawPath = ""
 	clone.RequestURI = ""
+	clone = internalGatewayRequest(clone)
 	gw.Handler().ServeHTTP(w, clone)
 }
 

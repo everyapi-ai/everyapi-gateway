@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yetone/magpie/internal/access"
 )
 
 func TestWebChatPageIsMobileEveryAPIEntry(t *testing.T) {
@@ -23,6 +25,14 @@ func TestWebChatPageIsMobileEveryAPIEntry(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "/settings?view=sessions") {
 		t.Fatal("homepage must not expose the sessions entry")
+	}
+}
+
+func TestInternalGatewayRequestHasServerIdentity(t *testing.T) {
+	r := internalGatewayRequest(httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil))
+	who := access.Caller(r.Context())
+	if who.KeyID == "" || who.KeyName == "" {
+		t.Fatalf("internal gateway request has no identity: %+v", who)
 	}
 }
 
