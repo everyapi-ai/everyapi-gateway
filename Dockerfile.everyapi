@@ -7,7 +7,7 @@ ARG VERSION=everyapi-dev
 RUN CGO_ENABLED=0 go build -tags nogui -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/everyapi-web ./cmd/everyapi-web
 
 FROM debian:12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* && groupadd -g 65532 gateway && useradd -u 65532 -g gateway -d /var/lib/everyapi-web/home gateway && mkdir -p /var/lib/everyapi-web && chown gateway:gateway /var/lib/everyapi-web
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git && rm -rf /var/lib/apt/lists/* && groupadd -g 65532 gateway && useradd -u 65532 -g gateway -d /var/lib/everyapi-web/home gateway && mkdir -p /var/lib/everyapi-web && chown gateway:gateway /var/lib/everyapi-web
 COPY --from=build /out/everyapi-web /usr/local/bin/everyapi-web
 COPY LICENSE /usr/share/licenses/everyapi-web/LICENSE
 USER 65532:65532
