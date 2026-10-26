@@ -39,6 +39,8 @@ type githubSession struct {
 	Workspace       *githubWorkspace
 	Running         bool
 	AgentError      string
+	Activity        []string
+	Cancel          context.CancelFunc
 }
 
 type githubWorkspace struct {
@@ -79,8 +81,10 @@ func githubProjectRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/github/repos", githubReposAPI)
 	mux.HandleFunc("GET /api/github/workspace", githubWorkspaceAPI)
 	mux.HandleFunc("POST /api/github/workspace", githubSelectWorkspaceAPI)
+	mux.HandleFunc("GET /api/github/file", githubWorkspaceFileAPI)
 	mux.HandleFunc("POST /api/github/agent", githubAgentAPI)
 	mux.HandleFunc("GET /api/github/agent", githubAgentStatusAPI)
+	mux.HandleFunc("DELETE /api/github/agent", githubCancelAgentAPI)
 	mux.HandleFunc("POST /api/github/pull-request", githubPullRequestAPI)
 }
 
@@ -168,7 +172,65 @@ func githubWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := s.Workspace
-	writeJSON(w, map[string]any{"selected": true, "repo": ws.Repo, "ref": ws.Ref, "prompt": ws.LastPrompt, "result": ws.LastResult, "pull_request": ws.PullRequest, "running": s.Running, "error": s.AgentError})
+	files, _ := workspaceFiles(ws.Path, 0)
+	writeJSON(w, map[string]any{"selected": true, "repo": ws.Repo, "ref": ws.Ref, "files": files, "prompt": ws.LastPrompt, "result": ws.LastResult, "pull_request": ws.PullRequest, "running": s.Running, "error": s.AgentError})
+}
+
+func githubWorkspaceFileAPI(w http.ResponseWriter, r *http.Request) {
+	s, ok := githubSessionFor(r)
+	if !ok {
+		http.Error(w, "请先授权 GitHub", http.StatusUnauthorized)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Workspace == nil {
+		http.Error(w, "请先选择 GitHub 项目", http.StatusBadRequest)
+		return
+	}
+	p, err := safeWorkspacePath(s.Workspace.Path, r.URL.Query().Get("path"))
+	if err != nil {
+		http.Error(w, "无法访问此文件", http.StatusBadRequest)
+		return
+	}
+	root, err := os.OpenRoot(s.Workspace.Path)
+	if err != nil {
+		http.Error(w, "无法打开工作区", http.StatusInternalServerError)
+		return
+	}
+	defer root.Close()
+	name, _ := filepath.Rel(s.Workspace.Path, p)
+	f, err := root.Open(name)
+	if err != nil {
+		http.Error(w, "无法读取文件", http.StatusNotFound)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		http.Error(w, "只能预览文本文件", http.StatusBadRequest)
+		return
+	}
+	const limit = 256 << 10
+	b, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		http.Error(w, "无法读取文件", http.StatusInternalServerError)
+		return
+	}
+	truncated := len(b) > limit
+	if truncated {
+		cut := limit
+		for cut > 0 && !utf8.RuneStart(b[cut]) {
+			cut--
+		}
+		b = b[:cut]
+	}
+	if !utf8.Valid(b) || bytes.IndexByte(b, 0) >= 0 {
+		http.Error(w, "此文件不是可预览的 UTF-8 文本", http.StatusUnsupportedMediaType)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]any{"path": filepath.ToSlash(name), "content": string(b), "truncated": truncated})
 }
 
 func githubSelectWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +260,8 @@ func githubSelectWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		in.Ref = "main"
 	}
 	if s.Workspace != nil && s.Workspace.Repo == in.Repo && s.Workspace.Ref == in.Ref {
-		writeJSON(w, map[string]any{"selected": true, "repo": in.Repo, "ref": in.Ref})
+		files, _ := workspaceFiles(s.Workspace.Path, 0)
+		writeJSON(w, map[string]any{"selected": true, "repo": in.Repo, "ref": in.Ref, "files": files})
 		return
 	}
 	if s.Workspace != nil && (len(changedFiles(r.Context(), s.Workspace.Path)) > 0 || (s.Workspace.Branch != "" && s.Workspace.PullRequest == nil)) {
@@ -220,7 +283,7 @@ func githubSelectWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Workspace = &githubWorkspace{Repo: in.Repo, Ref: in.Ref, Path: base}
-	files, _ := workspaceFiles(base, 2)
+	files, _ := workspaceFiles(base, 0)
 	writeJSON(w, map[string]any{"selected": true, "repo": in.Repo, "ref": in.Ref, "files": files})
 }
 
@@ -254,16 +317,29 @@ func githubAgentAPI(w http.ResponseWriter, r *http.Request) {
 	ws := s.Workspace
 	ws.LastPrompt, ws.LastResult = in.Prompt, nil
 	s.Running, s.AgentError = true, ""
+	s.Activity = []string{"任务已接受，等待模型分析…"}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	s.Cancel = cancel
 	// A mobile browser can disconnect while the model works. Keep the bounded task on the server and expose its result through GET so a refresh resumes it.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		result, err := runGitHubAgent(ctx, ws, in.Model, in.Prompt)
+		result, err := runGitHubAgent(ctx, ws, in.Model, in.Prompt, func(message string) {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			s.Activity = append(s.Activity, message)
+			if len(s.Activity) > 100 {
+				s.Activity = s.Activity[len(s.Activity)-100:]
+			}
+		})
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.Running = false
+		s.Cancel = nil
 		if err != nil {
 			s.AgentError = err.Error()
+			if errors.Is(ctx.Err(), context.Canceled) {
+				s.AgentError = "任务已停止，已有文件修改保留。"
+			}
 			reviewCtx, reviewCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer reviewCancel()
 			result = map[string]any{"message": "任务未完成，请检查已有修改后重试。", "files": changedFiles(reviewCtx, ws.Path), "diff": gitDiff(reviewCtx, ws.Path)}
@@ -287,7 +363,21 @@ func githubAgentStatusAPI(w http.ResponseWriter, r *http.Request) {
 	if s.Workspace != nil {
 		result = s.Workspace.LastResult
 	}
-	writeJSON(w, map[string]any{"running": s.Running, "error": s.AgentError, "result": result})
+	writeJSON(w, map[string]any{"running": s.Running, "error": s.AgentError, "result": result, "activity": s.Activity})
+}
+
+func githubCancelAgentAPI(w http.ResponseWriter, r *http.Request) {
+	s, ok := githubSessionFor(r)
+	if !ok {
+		http.Error(w, "请先授权 GitHub", http.StatusUnauthorized)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Cancel != nil {
+		s.Cancel()
+	}
+	writeJSON(w, map[string]any{"running": s.Running})
 }
 
 func githubPullRequestAPI(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +527,7 @@ func workspaceFiles(root string, depth int) ([]string, error) {
 			}
 			return nil
 		}
-		if d.IsDir() && strings.Count(name, "/") >= depth {
+		if depth > 0 && d.IsDir() && strings.Count(name, "/") >= depth {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() {
@@ -549,7 +639,7 @@ type githubToolCall struct {
 	Arguments json.RawMessage
 }
 
-func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt string) (map[string]any, error) {
+func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt string, report func(string)) (map[string]any, error) {
 	root := ws.Path
 	tools := []any{
 		map[string]any{"type": "function", "function": map[string]any{"name": "edit_file", "description": "Replace exactly one occurrence of old_text in an existing file with new_text. Read the file first and use a unique exact snippet including context. Prefer this for focused edits instead of rewriting the whole file.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "old_text": map[string]any{"type": "string"}, "new_text": map[string]any{"type": "string"}}, "required": []string{"path", "old_text", "new_text"}, "additionalProperties": false}}},
@@ -571,6 +661,10 @@ func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt stri
 	messages = append(messages, history...)
 	messages = append(messages, map[string]any{"role": "user", "content": prompt})
 	for step := 0; step < 32; step++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		report(fmt.Sprintf("正在分析 · 第 %d 步", step+1))
 		messages = boundGitHubAgentMessages(messages)
 		body := map[string]any{"model": model, "messages": messages, "tools": tools, "tool_choice": "auto", "stream": false}
 		b, _ := json.Marshal(body)
@@ -624,6 +718,14 @@ func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt stri
 		assistant["tool_calls"] = m.ToolCalls
 		messages = append(messages, assistant)
 		for _, call := range calls {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			var target struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(call.Arguments, &target)
+			report(call.Name + " " + target.Path)
 			result := githubToolResult(root, call)
 			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": result})
 		}

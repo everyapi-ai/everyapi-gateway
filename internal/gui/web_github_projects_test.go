@@ -62,6 +62,58 @@ func githubTestRepo(t *testing.T) string {
 	return root
 }
 
+func TestGitHubWorkspaceFilePreview(t *testing.T) {
+	root := githubTestRepo(t)
+	id := t.Name()
+	githubSessions.Store(id, &githubSession{Expires: time.Now().Add(time.Hour), Workspace: &githubWorkspace{Path: root}})
+	t.Cleanup(func() { githubSessions.Delete(id) })
+	for name, content := range map[string][]byte{".env": []byte("private"), "binary.dat": {0, 1, 2}, "large.txt": []byte(strings.Repeat("中", 100000))} {
+		if err := os.WriteFile(filepath.Join(root, name), content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		path string
+		auth bool
+		code int
+	}{
+		{"read%20me.txt", false, http.StatusUnauthorized},
+		{"read%20me.txt", true, http.StatusOK},
+		{"large.txt", true, http.StatusOK},
+		{"../outside", true, http.StatusBadRequest},
+		{".env", true, http.StatusBadRequest},
+		{".git/config", true, http.StatusBadRequest},
+		{"binary.dat", true, http.StatusUnsupportedMediaType},
+		{"missing.txt", true, http.StatusNotFound},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/api/github/file?path="+tc.path, nil)
+		if tc.auth {
+			r.AddCookie(&http.Cookie{Name: githubSessionCookie, Value: id})
+		}
+		w := httptest.NewRecorder()
+		githubWorkspaceFileAPI(w, r)
+		if w.Code != tc.code {
+			t.Fatalf("%s authenticated=%v: %d %s", tc.path, tc.auth, w.Code, w.Body.String())
+		}
+		if tc.code == http.StatusOK {
+			var out struct {
+				Content   string `json:"content"`
+				Truncated bool   `json:"truncated"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+			if tc.path == "large.txt" {
+				if !out.Truncated || len(out.Content) > 256<<10 || strings.ContainsRune(out.Content, '\uFFFD') {
+					t.Fatal("preview did not bound large UTF-8 text safely")
+				}
+			} else if out.Content != "before\n" {
+				t.Fatalf("preview content = %q", out.Content)
+			}
+		}
+	}
+}
+
 func TestGitHubChangedFilesPreservesPaths(t *testing.T) {
 	root := githubTestRepo(t)
 	if err := os.WriteFile(filepath.Join(root, "read me.txt"), []byte("after\n"), 0o600); err != nil {
@@ -349,14 +401,18 @@ func TestGitHubAgentResumesAfterBrowserDisconnect(t *testing.T) {
 		status := httptest.NewRecorder()
 		githubAgentStatusAPI(status, request(http.MethodGet, "/api/github/agent", ""))
 		var job struct {
-			Running bool           `json:"running"`
-			Error   string         `json:"error"`
-			Result  map[string]any `json:"result"`
+			Running  bool           `json:"running"`
+			Error    string         `json:"error"`
+			Result   map[string]any `json:"result"`
+			Activity []string       `json:"activity"`
 		}
 		if err := json.Unmarshal(status.Body.Bytes(), &job); err != nil {
 			t.Fatal(err)
 		}
 		if !job.Running {
+			if !strings.Contains(strings.Join(job.Activity, "\n"), "write_file read me.txt") {
+				t.Fatal("task activity did not expose the real file edit")
+			}
 			if job.Error != "" || job.Result == nil || !strings.Contains(fmt.Sprint(job.Result["diff"]), "+after") {
 				t.Fatalf("resumed task did not produce its diff: %s", status.Body.String())
 			}
@@ -372,6 +428,34 @@ func TestGitHubAgentResumesAfterBrowserDisconnect(t *testing.T) {
 	githubWorkspaceAPI(current, request(http.MethodGet, "/api/github/workspace", ""))
 	if !strings.Contains(current.Body.String(), "Update the file.") || !strings.Contains(current.Body.String(), "Updated the file.") {
 		t.Fatalf("refresh lost the prompt or result: %s", current.Body.String())
+	}
+}
+
+func TestGitHubCancelAgentRequiresSessionAndPreservesWorkspace(t *testing.T) {
+	root := githubTestRepo(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	id := t.Name()
+	s := &githubSession{Expires: time.Now().Add(time.Hour), Running: true, Cancel: cancel, Workspace: &githubWorkspace{Path: root}}
+	githubSessions.Store(id, s)
+	t.Cleanup(func() { githubSessions.Delete(id) })
+	for _, authenticated := range []bool{false, true, true} {
+		r := httptest.NewRequest(http.MethodDelete, "/api/github/agent", nil)
+		if authenticated {
+			r.AddCookie(&http.Cookie{Name: githubSessionCookie, Value: id})
+		}
+		w := httptest.NewRecorder()
+		githubCancelAgentAPI(w, r)
+		if !authenticated {
+			if w.Code != http.StatusUnauthorized || ctx.Err() != nil {
+				t.Fatal("unauthorized caller stopped a task")
+			}
+		} else if w.Code != http.StatusOK || ctx.Err() != context.Canceled || !s.Running {
+			t.Fatalf("stop must cancel without exposing the workspace before task cleanup: %d", w.Code)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(root, "read me.txt")); err != nil || string(b) != "before\n" {
+		t.Fatal("stop lost the workspace contents")
 	}
 }
 

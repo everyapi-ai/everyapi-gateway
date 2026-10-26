@@ -167,3 +167,71 @@ body.window .row.sm-sub-row { min-height: 42px; padding-left: calc(14px + var(--
 @media (max-width: 560px) {
   .sm-subs { --sub-step: 10px; padding-left: calc(12px + var(--sub-depth, 0) * var(--sub-step)); padding-right: 8px; }
 }
+
+/* EveryAPI project workbench */
+.everyapi-workbench { padding: 20px 24px 24px; gap: 14px; background: var(--bg); }
+.everyapi-chat-title { min-height: 34px; gap: 10px; }
+.everyapi-title-mark { color: var(--accent); font: 700 10px/1 var(--code-font, monospace); letter-spacing: .14em; }
+.everyapi-title-sub { color: var(--muted); font-size: 12px; }
+.everyapi-workbench-tabs { display: none; }
+.everyapi-workbench-grid { display: grid; grid-template-columns: minmax(190px, 240px) minmax(380px, 1fr) minmax(300px, 420px); gap: 14px; min-height: 0; flex: 1; }
+.everyapi-workbench-project, .everyapi-workbench-center, .everyapi-workbench-review { min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--card); }
+.everyapi-workbench-grid > * { min-width: 0; }
+.everyapi-workbench-project { overflow: auto; }
+.everyapi-workbench-center { overflow: hidden; }
+.everyapi-workbench-review { overflow: hidden; }
+.everyapi-panel-label { flex: none; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.everyapi-project-row { flex-wrap: wrap; }
+.everyapi-project-select { flex-basis: 100%; order: -1; }
+.everyapi-project-status { padding: 10px; border-radius: 9px; background: var(--bg); line-height: 1.5; }
+.everyapi-project-files, .everyapi-changed-files { min-height: 42px; max-height: 260px; overflow: auto; padding: 4px 0; }
+.everyapi-project-files { flex: 1; max-height: none; }
+.everyapi-workspace-file, .everyapi-file-row { display: block; width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; padding: 8px; border-radius: 6px; color: var(--fg-2); font: 12px/1.35 var(--code-font, monospace); overflow-wrap: anywhere; }
+.everyapi-file-search { width: 100%; min-width: 0; min-height: 38px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
+.everyapi-file-preview { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.everyapi-file-preview[hidden] { display: none; }
+.everyapi-file-preview-title { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.everyapi-file-preview-title strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.everyapi-file-preview-title button { flex: none; padding: 6px; border: 0; border-radius: 6px; color: var(--fg); background: var(--pill); cursor: pointer; }
+.everyapi-file-content { min-height: 150px; overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); color: var(--fg); font: 12px/1.6 var(--code-font, monospace); tab-size: 2; }
+.everyapi-chat-empty strong { color: var(--fg); font-size: 17px; }
+.everyapi-chat-empty p { max-width: 330px; line-height: 1.7; }
+.everyapi-choose-project { min-height: 44px; padding: 8px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; font: inherit; }
+.everyapi-workspace-file:hover, .everyapi-file-row:hover { background: var(--pill); }
+.everyapi-workspace-more, .everyapi-review-hint { padding: 7px 8px; color: var(--muted); font-size: 11px; }
+.everyapi-workbench-review .everyapi-project-diff { flex: 1; min-height: 180px; max-height: none; }
+.everyapi-workbench-review .everyapi-project-pr { width: 100%; min-height: 44px; }
+.everyapi-project-pr-link { display: flex; }
+.everyapi-project-pr-link .everyapi-project-auth { flex: 1; display: inline-flex; align-items: center; justify-content: center; }
+.everyapi-diff-label { margin-top: 6px; }
+.everyapi-chat-messages { border: 0; padding: 8px 2px; background: transparent; }
+.everyapi-task-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 28px; }
+.everyapi-task-stop { border: 1px solid var(--line); border-radius: 7px; background: var(--card); color: var(--fg); padding: 6px 10px; cursor: pointer; font: inherit; }
+.everyapi-task-activity { flex: none; font: 12px/1.6 var(--code-font, monospace); padding: 8px; border-radius: 8px; background: var(--bg); color: var(--muted); overflow-wrap: anywhere; }
+.everyapi-task-activity summary { cursor: pointer; }
+.everyapi-task-activity pre { max-height: 140px; overflow: auto; white-space: pre-wrap; margin: 8px 0 0; font: inherit; }
+.everyapi-chat-form { grid-template-columns: 150px minmax(0, 1fr) auto; }
+.everyapi-chat-form .everyapi-chat-model { grid-column: auto; }
+.everyapi-chat-send { width: auto; min-width: 64px; padding: 0 16px; font-size: 14px; }
+@media (max-width: 1100px) {
+  .everyapi-workbench { padding: 14px; }
+  .everyapi-workbench-grid { grid-template-columns: minmax(160px, 200px) minmax(300px, 1fr); }
+  .everyapi-workbench-review { grid-column: 1 / -1; min-height: 260px; }
+}
+@media (max-width: 640px) {
+  .everyapi-workbench { padding: 10px; gap: 10px; }
+  .everyapi-title-sub { display: none; }
+  .everyapi-workbench-tabs { display: flex; gap: 5px; padding: 3px; border-radius: 9px; background: var(--pill); }
+  .everyapi-workbench-tabs button { flex: 1; min-height: 36px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; }
+  .everyapi-workbench-tabs button.on { background: var(--card); color: var(--fg); box-shadow: 0 1px 3px #0002; }
+  .everyapi-workbench-grid { display: block; }
+  .everyapi-workbench-project, .everyapi-workbench-center, .everyapi-workbench-review { display: none; min-height: 0; height: 100%; padding: 11px; }
+  .everyapi-workbench-grid[data-mobile-panel="project"] .everyapi-workbench-project, .everyapi-workbench-grid[data-mobile-panel="center"] .everyapi-workbench-center, .everyapi-workbench-grid[data-mobile-panel="review"] .everyapi-workbench-review { display: flex; }
+  .everyapi-workbench-center { min-height: 0; }
+  .everyapi-workbench-review .everyapi-project-diff { min-height: 260px; }
+  .everyapi-chat-form { grid-template-columns: 1fr auto; }
+  .everyapi-chat-form .everyapi-chat-model { grid-column: 1 / -1; }
+  .everyapi-project-auth, .everyapi-github-config-edit { flex: 1; }
+  .everyapi-file-search { font-size: 16px; min-height: 44px; }
+  .everyapi-workspace-file, .everyapi-file-row { min-height: 44px; }
+}
