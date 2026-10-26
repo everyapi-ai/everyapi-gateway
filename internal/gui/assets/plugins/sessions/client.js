@@ -245,6 +245,7 @@ magpie.plugin("sessions", (ctx) => {
     const project = el("select", "everyapi-project-select");
     project.append(new Option("加载 GitHub 项目…", ""));
     const auth = el("a", "everyapi-project-auth", "授权 GitHub");
+    auth.hidden = true;
     auth.href = "/_github/start";
     const pr = el("button", "everyapi-project-pr", "创建 Pull Request");
     pr.type = "button"; pr.hidden = true;
@@ -275,7 +276,17 @@ magpie.plugin("sessions", (ctx) => {
       if (!list.length) model.append(new Option("暂无模型", ""));
       model.disabled = false;
     }).catch((err) => { model.replaceChildren(new Option("模型加载失败", "")); model.disabled = false; bubble("assistant", err.message, true); });
-    fetch("/api/github/repos", { headers: { Accept: "application/json" } }).then(async (res) => {
+    const loadRepos = async () => {
+      const status = await fetch("/api/github/status", { headers: { Accept: "application/json" } });
+      if (!status.ok) throw new Error(await errorText(status));
+      const config = await status.json();
+      if (!config.configured) {
+        auth.hidden = true; project.disabled = true;
+        project.replaceChildren(new Option("GitHub 尚未配置", ""));
+        projectStatus.textContent = "管理员需要先配置 GitHub OAuth App，回调地址为 https://gateway.everyapi.ai/_github/callback。";
+        return;
+      }
+      const res = await fetch("/api/github/repos", { headers: { Accept: "application/json" } });
       if (res.status === 401) { project.replaceChildren(new Option("请先授权 GitHub", "")); auth.hidden = false; projectStatus.textContent = "请先授权 GitHub，授权后可选择组织内项目。"; return; }
       if (!res.ok) throw new Error(await errorText(res));
       const repos = (await res.json())?.repos || [];
@@ -284,7 +295,8 @@ magpie.plugin("sessions", (ctx) => {
       project.replaceChildren(...repos.map((x) => new Option((x.private ? "🔒 " : "") + x.full_name, x.full_name)));
       if (!repos.length) project.append(new Option("没有可访问的项目", ""));
       projectStatus.textContent = repos.length ? "选择项目后输入修改要求，EveryAPI 会读取并修改工作区。" : "当前 GitHub 账号没有可访问的项目。";
-    }).catch((err) => { project.replaceChildren(new Option("GitHub 项目加载失败", "")); projectStatus.textContent = err.message; });
+    };
+    loadRepos().catch((err) => { project.replaceChildren(new Option("GitHub 项目加载失败", "")); projectStatus.textContent = err.message; });
     project.onchange = async () => {
       selectedRepo = project.value; pr.hidden = true; lastResult = null;
       if (!selectedRepo) return;

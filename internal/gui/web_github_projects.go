@@ -63,11 +63,17 @@ func githubProjectRoutes(mux *http.ServeMux) {
 	if !WebEveryAPIOnly {
 		return
 	}
+	mux.HandleFunc("GET /api/github/status", githubStatusAPI)
 	mux.HandleFunc("GET /api/github/repos", githubReposAPI)
 	mux.HandleFunc("GET /api/github/workspace", githubWorkspaceAPI)
 	mux.HandleFunc("POST /api/github/workspace", githubSelectWorkspaceAPI)
 	mux.HandleFunc("POST /api/github/agent", githubAgentAPI)
 	mux.HandleFunc("POST /api/github/pull-request", githubPullRequestAPI)
+}
+
+func githubStatusAPI(w http.ResponseWriter, _ *http.Request) {
+	cfg := loadWebGitHubConfig()
+	writeJSON(w, map[string]any{"configured": cfg.enabled(), "organization": cfg.Organization})
 }
 
 func githubReposAPI(w http.ResponseWriter, r *http.Request) {
