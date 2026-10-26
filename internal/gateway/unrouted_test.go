@@ -175,3 +175,21 @@ func TestUnroutedQuickRequestLeavesNoTrace(t *testing.T) {
 		}
 	}
 }
+
+func TestUnroutedWatchPreservesCallerBeforeHeaderChanges(t *testing.T) {
+	unroutedLimits(t, time.Hour, 2*time.Hour)
+	s := New()
+	r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	r.Header.Set("Authorization", "Bearer magpie-codex")
+	f := &inflight{start: time.Now()}
+	_, watched, done := s.watchUnrouted(httptest.NewRecorder(), r, f)
+	defer done()
+	// Middleware owns the live headers after the watch starts. The watch must retain the original caller without reading that mutable map.
+	watched.Header.Set("Authorization", "Bearer magpie-claude")
+	u := watched.Context().Value(unroutedKey{}).(*unroutedHold)
+	u.show()
+	routes := s.Trace(context.Background(), 0, 0).Routes
+	if len(routes) != 1 || routes[0].Agent != "codex" {
+		t.Fatalf("watch lost the original caller: %+v", routes)
+	}
+}

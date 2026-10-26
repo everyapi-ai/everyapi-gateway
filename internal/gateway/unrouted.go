@@ -195,7 +195,8 @@ func (s *Server) watchUnrouted(w http.ResponseWriter, r *http.Request, f *inflig
 	ctx, cancel := context.WithCancelCause(r.Context())
 	u := &unroutedHold{s: s, f: f, w: newHeldWriter(w), cancel: cancel}
 	r = r.WithContext(context.WithValue(ctx, unroutedKey{}, u))
-	u.r = r
+	// The timer observes a snapshot while middleware may strip the live request's headers.
+	u.r = r.Clone(r.Context())
 	f.mu.Lock()
 	f.unrouted = u
 	f.mu.Unlock()
