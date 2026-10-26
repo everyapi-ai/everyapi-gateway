@@ -351,7 +351,7 @@ func TestGitHubAgentResumesAfterBrowserDisconnect(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		message := map[string]any{"role": "assistant", "content": "Updated the file."}
 		if n <= 12 {
-			name, arguments := "read_file", `{"path":"context.txt"}`
+			name, arguments := "read_file", fmt.Sprintf(`{"path":"context.txt","offset":%d}`, n-1)
 			if n == 12 {
 				name, arguments = "write_file", `{"path":"read me.txt","content":"after\n"}`
 			}
@@ -456,6 +456,84 @@ func TestGitHubCancelAgentRequiresSessionAndPreservesWorkspace(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(root, "read me.txt")); err != nil || string(b) != "before\n" {
 		t.Fatal("stop lost the workspace contents")
+	}
+}
+
+func TestGitHubAgentFinalizesWithoutRepeatingTools(t *testing.T) {
+	for _, scenario := range []string{"repeated read", "step budget", "ignores final mode", "changed read result"} {
+		t.Run(scenario, func(t *testing.T) {
+			gitPath := os.Getenv("PATH")
+			sandboxHome(t)
+			t.Setenv("PATH", gitPath)
+			root := githubTestRepo(t)
+			var calls atomic.Int32
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					ToolChoice string `json:"tool_choice"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				n := calls.Add(1)
+				message := map[string]any{"role": "assistant", "content": "The file contains the requested configuration."}
+				if body.ToolChoice != "none" || scenario == "ignores final mode" {
+					name, args := "read_file", `{"path":"read me.txt"}`
+					if n%2 == 0 {
+						args = `{ "path" : "read me.txt" }`
+					}
+					if scenario == "step budget" {
+						args = fmt.Sprintf(`{"path":"read me.txt","offset":%d}`, n)
+					}
+					if scenario == "ignores final mode" && body.ToolChoice == "none" {
+						name, args = "write_file", `{"path":"read me.txt","content":"unwanted edit"}`
+					}
+					if scenario == "changed read result" {
+						if n == 3 {
+							name, args = "write_file", `{"path":"read me.txt","content":"after\n"}`
+						}
+						if n >= 6 {
+							_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": message}}})
+							return
+						}
+						if body.ToolChoice == "none" {
+							t.Error("a changed file was treated as unchanged repetition")
+						}
+					}
+					message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": fmt.Sprintf("call-%d", n), "type": "function", "function": map[string]any{"name": name, "arguments": args}}}}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": message}}})
+			}))
+			defer up.Close()
+			if err := provider.Save(provider.Provider{ID: "everyapi", Name: "EveryAPI", Chat: up.URL, Key: "fixture", Models: []string{"test"}}); err != nil {
+				t.Fatal(err)
+			}
+			old := served.Swap(gateway.New())
+			defer served.Store(old)
+			ws := &githubWorkspace{Path: root}
+			result, err := runGitHubAgent(context.Background(), ws, "everyapi/test", "Explain the file.", func(string) {})
+			if scenario == "ignores final mode" {
+				if err == nil {
+					t.Fatal("executed a tool despite final-answer mode")
+				}
+				b, _ := os.ReadFile(filepath.Join(root, "read me.txt"))
+				if string(b) != "before\n" {
+					t.Fatal("final-answer mode allowed an unwanted file edit")
+				}
+			} else if err != nil || result["message"] != "The file contains the requested configuration." {
+				t.Fatalf("failed to finish with available evidence: %v", err)
+			}
+			want := int32(4)
+			if scenario == "step budget" {
+				want = 32
+			}
+			if scenario == "changed read result" {
+				want = 6
+			}
+			if calls.Load() != want {
+				t.Fatalf("%d model requests, want %d", calls.Load(), want)
+			}
+		})
 	}
 }
 

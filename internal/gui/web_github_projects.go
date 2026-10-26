@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -697,7 +698,7 @@ func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt stri
 		map[string]any{"type": "function", "function": map[string]any{"name": "write_file", "description": "Write a text file to implement the requested change", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"path", "content"}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "git_diff", "description": "Show current changes", "parameters": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}},
 	}
-	messages := []any{map[string]any{"role": "system", "content": "You are a careful coding agent. Work only inside the selected repository. Inspect files before editing, staying focused on the requested files and behavior. Use search_files to locate named source files instead of recursively listing unrelated directories. Prefer edit_file for focused changes and write_file for new files. Review the diff, then explain the changes when done. Never modify .git or secrets. You cannot execute commands or run tests; do not claim tests passed."}}
+	messages := []any{map[string]any{"role": "system", "content": "You are a careful coding agent. Work only inside the selected repository. Inspect files before editing, staying focused on the requested files and behavior. For questions about specific files, read those files and answer directly; do not explore unrelated implementation details. Reuse earlier tool results rather than rereading unchanged files. Use search_files only to locate filenames, not to search file contents or function names. Prefer edit_file for focused changes and write_file for new files. Review the diff, then explain the changes when done. Never modify .git or secrets. You cannot execute commands or run tests; do not claim tests passed."}}
 	history := ws.History
 	for len(history) > 0 {
 		b, _ := json.Marshal(history)
@@ -708,13 +709,23 @@ func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt stri
 	}
 	messages = append(messages, history...)
 	messages = append(messages, map[string]any{"role": "user", "content": prompt})
+	repeatedTools := map[string]int{}
+	forceFinal := false
 	for step := 0; step < 32; step++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		report(fmt.Sprintf("正在分析 · 第 %d 步", step+1))
 		messages = boundGitHubAgentMessages(messages)
-		body := map[string]any{"model": model, "messages": messages, "tools": tools, "tool_choice": "auto", "stream": false}
+		choice := any("auto")
+		if step == 31 {
+			forceFinal = true
+		}
+		if forceFinal {
+			choice = "none"
+			messages = append(messages, map[string]any{"role": "system", "content": "Finish now using the evidence already collected. Do not call tools. Answer the user's original request directly, and clearly state any incomplete work or uncertainty. Do not claim that unperformed edits or tests succeeded."})
+		}
+		body := map[string]any{"model": model, "messages": messages, "tools": tools, "tool_choice": choice, "stream": false}
 		b, _ := json.Marshal(body)
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(b)).WithContext(ctx)
 		// The standalone distribution requires an issued client key even on
@@ -763,6 +774,9 @@ func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt stri
 			}
 			return map[string]any{"message": m.Content, "files": changedFiles(ctx, root), "diff": gitDiff(ctx, root)}, nil
 		}
+		if forceFinal {
+			return nil, errors.New("模型未能结束任务，请换一个模型重试；已有修改保留。")
+		}
 		assistant["tool_calls"] = m.ToolCalls
 		messages = append(messages, assistant)
 		for _, call := range calls {
@@ -775,6 +789,16 @@ func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt stri
 			_ = json.Unmarshal(call.Arguments, &target)
 			report(call.Name + " " + target.Path)
 			result := githubToolResult(root, call)
+			var arguments any
+			_ = json.Unmarshal(call.Arguments, &arguments)
+			canonical, _ := json.Marshal(arguments)
+			resultHash := sha256.Sum256([]byte(result))
+			callKey := fmt.Sprintf("%s:%s:%x", call.Name, canonical, resultHash)
+			repeatedTools[callKey]++
+			if repeatedTools[callKey] >= 3 {
+				forceFinal = true
+				report("工具调用重复且结果未变化，正在整理已有结果…")
+			}
 			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": result})
 		}
 	}
