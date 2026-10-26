@@ -552,12 +552,14 @@ type githubToolCall struct {
 func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt string) (map[string]any, error) {
 	root := ws.Path
 	tools := []any{
+		map[string]any{"type": "function", "function": map[string]any{"name": "edit_file", "description": "Replace exactly one occurrence of old_text in an existing file with new_text. Read the file first and use a unique exact snippet including context. Prefer this for focused edits instead of rewriting the whole file.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "old_text": map[string]any{"type": "string"}, "new_text": map[string]any{"type": "string"}}, "required": []string{"path", "old_text", "new_text"}, "additionalProperties": false}}},
+		map[string]any{"type": "function", "function": map[string]any{"name": "search_files", "description": "Find project file paths containing query, such as 'github', 'sessions' or 'README'. Use this to locate named source files instead of recursively listing directories. Results are paginated with next_offset.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}}, "required": []string{"query"}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "list_files", "description": "List one directory, starting at path '.' for the root. Directories end with '/'. Use next_offset as offset for another page, or choose a subdirectory. Returns at most 100 entries.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "read_file", "description": "Read up to 16 KiB of a text file. Large files return content and next_offset; pass that byte offset to continue.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}}, "required": []string{"path"}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "write_file", "description": "Write a text file to implement the requested change", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"path", "content"}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "git_diff", "description": "Show current changes", "parameters": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}},
 	}
-	messages := []any{map[string]any{"role": "system", "content": "You are a careful coding agent. Work only inside the selected repository. Inspect files before editing. Use write_file for requested changes. Never modify .git or secrets. Explain the changes when done. You cannot execute commands or run tests; do not claim tests passed."}}
+	messages := []any{map[string]any{"role": "system", "content": "You are a careful coding agent. Work only inside the selected repository. Inspect files before editing, staying focused on the requested files and behavior. Use search_files to locate named source files instead of recursively listing unrelated directories. Prefer edit_file for focused changes and write_file for new files. Review the diff, then explain the changes when done. Never modify .git or secrets. You cannot execute commands or run tests; do not claim tests passed."}}
 	history := ws.History
 	for len(history) > 0 {
 		b, _ := json.Marshal(history)
@@ -665,13 +667,69 @@ func boundGitHubAgentMessages(messages []any) []any {
 
 func githubToolResult(root string, call githubToolCall) string {
 	var in struct {
-		Path, Content string
-		Offset        int
+		Path, Content, Query string
+		Offset               int
+		OldText              string `json:"old_text"`
+		NewText              string `json:"new_text"`
 	}
 	if err := json.Unmarshal(call.Arguments, &in); err != nil || in.Offset < 0 {
 		return "invalid tool arguments"
 	}
 	switch call.Name {
+	case "edit_file":
+		if in.OldText == "" {
+			return "old_text must not be empty"
+		}
+		p, err := safeWorkspacePath(root, in.Path)
+		if err != nil {
+			return err.Error()
+		}
+		r, err := os.OpenRoot(root)
+		if err != nil {
+			return "cannot open workspace"
+		}
+		defer r.Close()
+		name, _ := filepath.Rel(root, p)
+		f, err := r.Open(name)
+		if err != nil {
+			return "cannot read file"
+		}
+		b, err := io.ReadAll(io.LimitReader(f, (2<<20)+1))
+		f.Close()
+		if err != nil || len(b) > 2<<20 || !utf8.Valid(b) {
+			return "cannot edit file: UTF-8 text up to 2 MiB is required"
+		}
+		text := string(b)
+		if strings.Count(text, in.OldText) != 1 {
+			return "old_text must match exactly once; read the file and include more surrounding context"
+		}
+		text = strings.Replace(text, in.OldText, in.NewText, 1)
+		if len(text) > 2<<20 {
+			return "file too large"
+		}
+		if err := r.WriteFile(name, []byte(text), 0o600); err != nil {
+			return "cannot write file"
+		}
+		return "edited"
+	case "search_files":
+		if strings.TrimSpace(in.Query) == "" || len(in.Query) > 200 {
+			return "query must contain 1 to 200 bytes"
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		out, err := gitRunOutput(ctx, root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+		if err != nil {
+			return "cannot search project files"
+		}
+		files := []string{}
+		for _, name := range strings.Split(out, "\x00") {
+			if _, err := workspaceFileName(name); err != nil || !strings.Contains(strings.ToLower(name), strings.ToLower(in.Query)) {
+				continue
+			}
+			files = append(files, name)
+		}
+		sort.Strings(files)
+		return githubFilePage(files, in.Offset)
 	case "list_files":
 		return workspaceDirectoryPage(root, in.Path, in.Offset)
 	case "read_file":
@@ -777,6 +835,10 @@ func workspaceDirectoryPage(root, name string, offset int) string {
 		}
 		files = append(files, p)
 	}
+	return githubFilePage(files, offset)
+}
+
+func githubFilePage(files []string, offset int) string {
 	if offset > len(files) {
 		return "directory offset is out of range"
 	}

@@ -79,7 +79,7 @@ func TestGitHubChangedFilesPreservesPaths(t *testing.T) {
 }
 
 func TestGitHubDirectoryToolsBoundLargeRepositories(t *testing.T) {
-	root := t.TempDir()
+	root := githubTestRepo(t)
 	if err := os.Mkdir(filepath.Join(root, "src"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +102,14 @@ func TestGitHubDirectoryToolsBoundLargeRepositories(t *testing.T) {
 	last := call("list_files", `{"path":"src","offset":200}`)
 	if !strings.Contains(last, "file-259") || strings.Contains(last, "file-000") {
 		t.Fatal("directory pagination lost or repeated entries")
+	}
+	search := call("search_files", `{"query":"file-259"}`)
+	if !strings.Contains(search, "src/file-259.txt") || strings.Contains(search, "file-000") {
+		t.Fatal("filename search could not locate a nested project file")
+	}
+	search = call("search_files", `{"query":".txt"}`)
+	if !strings.Contains(search, "next_offset") || strings.Contains(search, "file-259") {
+		t.Fatal("filename search dumped a large result without pagination")
 	}
 	text := strings.Repeat("a", 20<<10) + "END"
 	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte(text), 0o600); err != nil {
@@ -130,6 +138,16 @@ func TestGitHubDirectoryToolsBoundLargeRepositories(t *testing.T) {
 	if part.Content+rest != unicode {
 		t.Fatal("paged reads split or lost a UTF-8 character")
 	}
+	if got := call("edit_file", `{"path":"large.txt","old_text":"END","new_text":"DONE"}`); got != "edited" {
+		t.Fatalf("focused edit failed: %s", got)
+	}
+	if got := call("edit_file", `{"path":"large.txt","old_text":"aa","new_text":"bad"}`); !strings.Contains(got, "exactly once") {
+		t.Fatal("ambiguous edit was not rejected")
+	}
+	updated, err := os.ReadFile(filepath.Join(root, "large.txt"))
+	if err != nil || string(updated) != strings.TrimSuffix(text, "END")+"DONE" {
+		t.Fatal("focused edit changed unrelated file content")
+	}
 }
 
 func TestGitHubToolsRejectMetadataAndSymlinks(t *testing.T) {
@@ -149,10 +167,10 @@ func TestGitHubToolsRejectMetadataAndSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"../private.txt", ".git/config", "escape/private.txt", "escape/new.txt", "metadata/config"} {
-		for _, tool := range []string{"read_file", "write_file"} {
-			args, _ := json.Marshal(map[string]string{"path": name, "content": "overwritten"})
+		for _, tool := range []string{"read_file", "write_file", "edit_file"} {
+			args, _ := json.Marshal(map[string]string{"path": name, "content": "overwritten", "old_text": "private fixture", "new_text": "overwritten"})
 			got := githubToolResult(root, githubToolCall{Name: tool, Arguments: args})
-			if got == "written" || strings.Contains(got, "private fixture") {
+			if got == "written" || got == "edited" || strings.Contains(got, "private fixture") {
 				t.Errorf("%s accessed %q: %s", tool, name, got)
 			}
 		}
