@@ -116,6 +116,7 @@ def main():
     try:
         docker("volume", "create", NAME)
         start()
+        assert docker("exec", NAME, "git", "--version").startswith("git version "), "project assistant cannot run git"
         admin = docker("exec", NAME, "cat", "/var/lib/everyapi-web/admin-key")
         client = docker("exec", NAME, "cat", "/var/lib/everyapi-web/client-key")
         assert len(admin) >= 16 and len(client) >= 16 and admin != client

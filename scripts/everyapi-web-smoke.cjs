@@ -5,6 +5,7 @@ const net = require('node:net');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawn, execFile } = require('node:child_process');
 const { once } = require('node:events');
 const { promisify } = require('node:util');
@@ -17,6 +18,21 @@ async function freePort() {
   const port = server.address().port;
   await new Promise(resolve => server.close(resolve));
   return port;
+}
+
+async function stopGateway(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = once(child, 'exit');
+  const signal = name => {
+    try { process.platform !== 'win32' ? process.kill(-child.pid, name) : child.kill(name); }
+    catch (err) { if (err.code !== 'ESRCH') throw err; }
+  };
+  let timer;
+  signal('SIGTERM');
+  try { await Promise.race([exited, new Promise(resolve => { timer = setTimeout(resolve, 10000); })]); }
+  finally { clearTimeout(timer); }
+  if (child.exitCode === null && child.signalCode === null) signal('SIGKILL');
+  await exited;
 }
 
 async function main() {
@@ -48,38 +64,44 @@ async function main() {
     const base = `http://127.0.0.1:${upstream.address().port}`;
     const internalPort = await freePort();
     const webPort = await freePort();
-    child = spawn(path.resolve(process.argv[2] || 'dist/everyapi-web'), ['--data-dir', data, '--addr', `127.0.0.1:${webPort}`], {
-      env: {
-        ...process.env,
-        EVERYAPI_API_BASE: base,
-        EVERYAPI_API_KEY: '',
-        EVERYAPI_API_KEY_FILE: '',
-        EVERYAPI_WEB_KEY: admin,
-        EVERYAPI_WEB_KEY_FILE: '',
-        EVERYAPI_GATEWAY_KEY: client,
-        EVERYAPI_GATEWAY_KEY_FILE: '',
-        EVERYAPI_INTERNAL_ADDR: `127.0.0.1:${internalPort}`,
-        EVERYAPI_PUBLIC_URL: '',
-        EVERYAPI_REGION: 'global',
-        HTTP_PROXY: base, HTTPS_PROXY: base, ALL_PROXY: base,
-        http_proxy: base, https_proxy: base, all_proxy: base,
-        NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost',
-      },
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const address = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('gateway startup timed out')), 20000);
-      const read = chunk => {
-        output += chunk.toString();
-        const match = output.match(/EveryAPI Gateway on (http:\/\/127\.0\.0\.1:\d+)/);
-        if (match) { clearTimeout(timer); resolve(match[1]); }
-      };
-      child.stdout.on('data', read);
-      child.stderr.on('data', read);
-      child.once('error', err => { clearTimeout(timer); reject(err); });
-      child.once('exit', code => { clearTimeout(timer); reject(new Error(`gateway exited ${code}: ${output}`)); });
-    });
+    const start = async () => {
+      output = '';
+      child = spawn(path.resolve(process.argv[2] || 'dist/everyapi-web'), ['--data-dir', data, '--addr', `127.0.0.1:${webPort}`], {
+        env: {
+          ...process.env,
+          EVERYAPI_DATA_DIR: data,
+          EVERYAPI_API_BASE: base,
+          EVERYAPI_API_KEY: '',
+          EVERYAPI_API_KEY_FILE: '',
+          EVERYAPI_WEB_KEY: admin,
+          EVERYAPI_WEB_KEY_FILE: '',
+          EVERYAPI_GATEWAY_KEY: client,
+          EVERYAPI_GATEWAY_KEY_FILE: '',
+          EVERYAPI_INTERNAL_ADDR: `127.0.0.1:${internalPort}`,
+          EVERYAPI_PUBLIC_URL: '',
+          EVERYAPI_REGION: 'global',
+          HTTP_PROXY: base, HTTPS_PROXY: base, ALL_PROXY: base,
+          http_proxy: base, https_proxy: base, all_proxy: base,
+          NO_PROXY: process.env.REAL_GITHUB_PERSISTENCE ? '127.0.0.1,localhost,api.github.com' : '127.0.0.1,localhost',
+          no_proxy: process.env.REAL_GITHUB_PERSISTENCE ? '127.0.0.1,localhost,api.github.com' : '127.0.0.1,localhost',
+        },
+        detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('gateway startup timed out')), 20000);
+        const read = chunk => {
+          output += chunk.toString();
+          const match = output.match(/EveryAPI Gateway on (http:\/\/127\.0\.0\.1:\d+)/);
+          if (match) { clearTimeout(timer); resolve(match[1]); }
+        };
+        child.stdout.on('data', read);
+        child.stderr.on('data', read);
+        child.once('error', err => { clearTimeout(timer); reject(err); });
+        child.once('exit', code => { clearTimeout(timer); reject(new Error(`gateway exited ${code}: ${output}`)); });
+      });
+    };
+    const address = await start();
     assert(!output.includes(admin), 'startup log leaked management password');
     assert(!output.includes(client), 'startup log leaked client key');
     assert(!output.includes(upstreamKey), 'startup log leaked upstream key');
@@ -95,7 +117,7 @@ async function main() {
     await page.goto(address);
     await page.locator('input[name=key]').fill(admin);
     await page.locator('button[type=submit]').click();
-    await page.waitForFunction(() => document.body?.classList.contains('gateway-mode') && document.querySelector('#everyapiConfig'));
+    await page.waitForFunction(() => document.body?.classList.contains('gateway-mode') && document.querySelector('.everyapi-chat-form'));
     assert.equal(await page.title(), 'EveryAPI Gateway');
     assert.equal(await page.locator('.brand').innerText(), 'EveryAPI Gateway');
     assert.equal(await page.locator('[data-view=agents]').isVisible(), false, 'server showed local-agent controls');
@@ -104,9 +126,10 @@ async function main() {
     assert.equal(state.noAccountDiscovery, true);
     assert.equal(state.noAutoUpdate, true);
     // Configure the single EveryAPI connection through its real UI, from a blank-key install.
+    await page.locator('#nav [data-view=providers]').click();
     await page.locator('#everyapiAPIKey').fill(upstreamKey);
     const fetched = page.waitForResponse(r => new URL(r.url()).pathname === '/api/everyapi/models');
-    await page.getByRole('button', { name: 'Save and refresh models', exact: true }).click();
+    await page.locator('#everyapiConfig .everyapi-actions button[type=button]').click();
     assert.equal((await fetched).status(), 200);
     await page.locator('#everyapiConfig input[name=models]').waitFor();
     const providers = await page.evaluate(() => fetch('/api/providers').then(r => r.json()));
@@ -133,6 +156,7 @@ async function main() {
     });
     assert.equal(relay.status, 200);
     assert.equal((await relay.json()).choices[0].message.content, 'smoke passed');
+    await require('./everyapi-web-projects.cjs')(browser, page, address);
     await page.locator('[data-view=gateway]').click();
     await page.locator('#view-gateway').waitFor({ state: 'visible' });
     await page.waitForFunction(key => document.querySelector('#connect .snip')?.textContent.includes(key), client);
@@ -190,26 +214,58 @@ async function main() {
     }
     console.log('PASS: localized sign-in in five languages, incorrect/stale credentials, persistent browser session after reload');
     if (process.env.MOBILE_PWA) await require('./everyapi-web-mobile.cjs')(browser, address, admin, client, upstreamKey, page);
+    // Seed a private grant as an already-completed authorization. OAuth consent
+    // is covered separately; this checks the production binary and disk format.
+    const id = crypto.randomBytes(24).toString('hex');
+    const token = process.env.REAL_GITHUB_PERSISTENCE ? (await promisify(execFile)('gh', ['auth', 'token'], { timeout: 10000 })).stdout.trim() : 'persisted-fixture-token';
+    const checkout = path.join(data, 'github-workspaces', 'persistence-project');
+    await fs.mkdir(checkout, { recursive: true, mode: 0o700 });
+    await fs.writeFile(path.join(checkout, 'README.md'), '# Retained project after restart\n');
+    await fs.writeFile(path.join(data, 'github-oauth.json'), JSON.stringify({ client_id: 'persistence-client', client_secret: 'fixture-secret', organization: 'everyapi-ai' }), { mode: 0o600 });
+    const nonce = crypto.randomBytes(12);
+    const key = crypto.createHash('sha256').update('everyapi-github-session-key-v1:' + id).digest();
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+    cipher.setAAD(Buffer.from('everyapi-github-session-v1:persistence-client:everyapi-ai'));
+    const grant = JSON.stringify({ Token: token, Username: 'persistence-user', Expires: new Date(Date.now() + 400 * 86400000).toISOString(), Workspace: { Repo: 'everyapi-ai/everyapi-gateway', Ref: 'main', Path: checkout, LastPrompt: 'Retain this project.' } });
+    const encrypted = Buffer.concat([nonce, cipher.update(grant), cipher.final(), cipher.getAuthTag()]);
+    const grants = path.join(data, 'github-sessions');
+    await fs.mkdir(grants, { mode: 0o700 });
+    await fs.writeFile(path.join(grants, crypto.createHash('sha256').update(id).digest('hex') + '.session'), encrypted, { mode: 0o600 });
+    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+    try {
+      await phone.addCookies(await page.context().cookies());
+      await phone.addCookies([{ name: 'magpie_github_session', value: id, url: address, httpOnly: true, sameSite: 'Lax', expires: Date.now() / 1000 + 400 * 86400 }]);
+      const readWorkspace = async () => {
+        const response = await phone.request.get(address + '/api/github/workspace');
+        assert.equal(response.status(), 200, 'stored grant requires authorization again');
+        const workspace = await response.json();
+        assert.equal(workspace.repo, 'everyapi-ai/everyapi-gateway');
+        assert.equal(workspace.prompt, 'Retain this project.');
+        if (process.env.REAL_GITHUB_PERSISTENCE) {
+          const repos = await phone.request.get(address + '/api/github/repos');
+          assert.equal(repos.status(), 200, 'persisted real GitHub grant stopped working');
+          assert((await repos.json()).repos.some(repo => repo.full_name === 'everyapi-ai/everyapi-gateway'));
+        }
+      };
+      await readWorkspace();
+      await stopGateway(child);
+      assert.equal(await start(), address, 'restart changed origin');
+      await readWorkspace();
+      const reopened = await phone.newPage();
+      await reopened.route('**/*', route => new URL(route.request().url()).origin === address ? route.continue() : route.abort());
+      await reopened.goto(address + '/settings?view=sessions');
+      await reopened.locator('.everyapi-file-content').filter({ hasText: '# Retained project after restart' }).waitFor();
+      await reopened.reload();
+      await reopened.locator('.everyapi-file-content').filter({ hasText: '# Retained project after restart' }).waitFor();
+      assert.equal(await reopened.locator('.everyapi-project-auth').isVisible(), false);
+      assert.equal((await phone.request.post(address + '/api/github/disconnect', { headers: { Origin: address } })).status(), 200);
+      assert.equal((await phone.request.get(address + '/api/github/workspace')).status(), 401);
+      console.log(`PASS: production process restart, same browser cookie, retained project, iPhone viewport reload and explicit disconnect (${process.env.REAL_GITHUB_PERSISTENCE ? 'real GitHub API grant; preauthorized, no OAuth consent' : 'fixture grant'})`);
+    } finally { await phone.close(); }
     console.log('PASS: blank-key startup, sign-in, Web provider configuration, EveryAPI branding, isolated gateway mode, model discovery, authenticated relay, usable connection examples, credential-safe startup logs');
   } finally {
     if (browser) await browser.close();
-    if (child) {
-      const signal = name => {
-        try {
-          if (process.platform !== 'win32') process.kill(-child.pid, name);
-          else if (child.exitCode === null && child.signalCode === null) child.kill(name);
-        } catch (err) { if (err.code !== 'ESRCH') throw err; }
-      };
-      if (child.exitCode === null && child.signalCode === null) {
-        const exited = once(child, 'exit');
-        let timer;
-        signal('SIGTERM');
-        try { await Promise.race([exited, new Promise(resolve => { timer = setTimeout(resolve, 10000); })]); }
-        finally { clearTimeout(timer); }
-        if (child.exitCode === null && child.signalCode === null) signal('SIGKILL');
-        await exited;
-      }
-    }
+    await stopGateway(child);
     await new Promise(resolve => upstream.close(resolve));
     await fs.rm(data, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }

@@ -169,7 +169,7 @@ func webGitHubRoutes(cookie, key string, keep time.Duration, next http.Handler) 
 			secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 			http.SetCookie(w, &http.Cookie{Name: githubStateCookie, Value: state, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int(githubStateAge / time.Second)})
 			redirect := githubCallbackURL(r)
-			q := url.Values{"client_id": {cfg.ClientID}, "redirect_uri": {redirect}, "scope": {"repo read:org user:email"}, "state": {state}}
+			q := url.Values{"client_id": {cfg.ClientID}, "redirect_uri": {redirect}, "scope": {"repo read:org user:email offline_access"}, "state": {state}}
 			http.Redirect(w, r, "https://github.com/login/oauth/authorize?"+q.Encode(), http.StatusFound)
 		case githubCallbackPath:
 			webGitHubCallback(w, r, cfg, cookie, key, keep)
@@ -233,8 +233,11 @@ func webGitHubCallback(w http.ResponseWriter, r *http.Request, cfg githubAuthCon
 	}
 	defer res.Body.Close()
 	var token struct {
-		AccessToken string `json:"access_token"`
-		Error       string `json:"error"`
+		AccessToken           string `json:"access_token"`
+		RefreshToken          string `json:"refresh_token"`
+		ExpiresIn             int    `json:"expires_in"`
+		RefreshTokenExpiresIn int    `json:"refresh_token_expires_in"`
+		Error                 string `json:"error"`
 	}
 	if res.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&token) != nil || token.AccessToken == "" {
 		webGitHubError(w, "GitHub 授权交换失败，请稍后重试。")
@@ -252,8 +255,39 @@ func webGitHubCallback(w http.ResponseWriter, r *http.Request, cfg githubAuthCon
 		webGitHubError(w, "无法创建 GitHub 会话，请稍后重试。")
 		return
 	}
-	githubSessions.Store(sessionID, &githubSession{Token: token.AccessToken, Username: username, Expires: time.Now().Add(24 * time.Hour)})
-	http.SetCookie(w, &http.Cookie{Name: githubSessionCookie, Value: sessionID, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int((24 * time.Hour) / time.Second)})
+	now := time.Now()
+	grantExpiry := now.Add(400 * 24 * time.Hour)
+	refreshExpiry := time.Time{}
+	if token.RefreshTokenExpiresIn > 0 {
+		refreshExpiry = now.Add(time.Duration(token.RefreshTokenExpiresIn) * time.Second)
+	}
+	tokenExpiry := time.Time{}
+	if token.ExpiresIn > 0 {
+		tokenExpiry = now.Add(time.Duration(token.ExpiresIn) * time.Second)
+	}
+	s := &githubSession{id: sessionID, binding: githubSessionBinding()}
+	// Reconnecting the same GitHub account retains its checkout, changes and PR.
+	if c, err := r.Cookie(githubSessionCookie); err == nil {
+		if previous, err := loadGitHubSession(c.Value); err == nil {
+			previous.mu.Lock()
+			if previous.Username == username && !previous.disconnected {
+				s = previous
+				sessionID = c.Value
+			}
+			previous.mu.Unlock()
+		}
+	}
+	s.mu.Lock()
+	s.Token, s.RefreshToken, s.Username = token.AccessToken, token.RefreshToken, username
+	s.Expires, s.TokenExpires, s.RefreshExpires, s.Invalid = grantExpiry, tokenExpiry, refreshExpiry, false
+	if err := saveGitHubSessionLocked(s); err != nil {
+		s.mu.Unlock()
+		webGitHubError(w, "无法保存 GitHub 连接，请稍后重试。")
+		return
+	}
+	s.mu.Unlock()
+	githubSessions.Store(sessionID, s)
+	http.SetCookie(w, &http.Cookie{Name: githubSessionCookie, Value: sessionID, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int((grantExpiry.Sub(now)) / time.Second)})
 	http.SetCookie(w, &http.Cookie{Name: cookie, Value: key, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: maxAge})
 	http.Redirect(w, r, "/settings?view=sessions", http.StatusSeeOther)
 }
