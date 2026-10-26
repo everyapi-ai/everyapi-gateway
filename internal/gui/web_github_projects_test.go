@@ -78,6 +78,60 @@ func TestGitHubChangedFilesPreservesPaths(t *testing.T) {
 	}
 }
 
+func TestGitHubDirectoryToolsBoundLargeRepositories(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "src"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 260 {
+		if err := os.WriteFile(filepath.Join(root, "src", fmt.Sprintf("file-%03d.txt", i)), []byte("example"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := func(name, arguments string) string {
+		return githubToolResult(root, githubToolCall{Name: name, Arguments: json.RawMessage(arguments)})
+	}
+	first := call("list_files", `{"path":"."}`)
+	if strings.Contains(first, "file-259") || !strings.Contains(first, "src/") {
+		t.Fatalf("root listing recursively dumped the project: %d bytes", len(first))
+	}
+	page := call("list_files", `{"path":"src"}`)
+	if strings.Contains(page, "file-259") || !strings.Contains(page, "next_offset") {
+		t.Fatalf("large directory was not paginated: %d bytes", len(page))
+	}
+	last := call("list_files", `{"path":"src","offset":200}`)
+	if !strings.Contains(last, "file-259") || strings.Contains(last, "file-000") {
+		t.Fatal("directory pagination lost or repeated entries")
+	}
+	text := strings.Repeat("a", 20<<10) + "END"
+	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	chunk := call("read_file", `{"path":"large.txt"}`)
+	if len(chunk) > 17<<10 || !strings.Contains(chunk, "next_offset") {
+		t.Fatalf("large read did not bound model input: %d bytes", len(chunk))
+	}
+	end := call("read_file", `{"path":"large.txt","offset":20480}`)
+	if end != "END" {
+		t.Fatalf("file offset did not resume reading: %d bytes", len(end))
+	}
+	unicode := strings.Repeat("文件", 4000)
+	if err := os.WriteFile(filepath.Join(root, "unicode.txt"), []byte(unicode), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var part struct {
+		Content string `json:"content"`
+		Offset  int    `json:"next_offset"`
+	}
+	if err := json.Unmarshal([]byte(call("read_file", `{"path":"unicode.txt"}`)), &part); err != nil {
+		t.Fatal(err)
+	}
+	rest := call("read_file", fmt.Sprintf(`{"path":"unicode.txt","offset":%d}`, part.Offset))
+	if part.Content+rest != unicode {
+		t.Fatal("paged reads split or lost a UTF-8 character")
+	}
+}
+
 func TestGitHubToolsRejectMetadataAndSymlinks(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o700); err != nil {
@@ -172,6 +226,15 @@ func TestGitHubAgentResumesAfterBrowserDisconnect(t *testing.T) {
 	sandboxHome(t)
 	t.Setenv("PATH", gitPath)
 	root := githubTestRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "context.txt"), []byte(strings.Repeat("example line\n", 2000)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitRun(context.Background(), root, "add", "context.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitRun(context.Background(), root, "commit", "-qm", "Add context fixture"); err != nil {
+		t.Fatal(err)
+	}
 	started, release := make(chan struct{}), make(chan struct{})
 	var released sync.Once
 	var calls atomic.Int32
@@ -179,7 +242,14 @@ func TestGitHubAgentResumesAfterBrowserDisconnect(t *testing.T) {
 		var body struct {
 			Messages []map[string]any `json:"messages"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		raw, err := io.ReadAll(r.Body)
+		if len(raw) > 96<<10 {
+			t.Error("model input exceeded the bounded project context")
+		}
+		if err != nil {
+			t.Error(err)
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Error(err)
 		}
 		n := calls.Add(1)
@@ -210,9 +280,9 @@ func TestGitHubAgentResumesAfterBrowserDisconnect(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		message := map[string]any{"role": "assistant", "content": "Updated the file."}
-		if n <= 2 {
-			name, arguments := "read_file", `{"path":"read me.txt"}`
-			if n == 2 {
+		if n <= 12 {
+			name, arguments := "read_file", `{"path":"context.txt"}`
+			if n == 12 {
 				name, arguments = "write_file", `{"path":"read me.txt","content":"after\n"}`
 			}
 			message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": fmt.Sprintf("call-%d", n), "type": "function", "function": map[string]any{"name": name, "arguments": arguments}}}}

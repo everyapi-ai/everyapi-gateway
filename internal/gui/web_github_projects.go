@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yetone/magpie/internal/proc"
 	"github.com/yetone/magpie/internal/settings"
@@ -263,7 +264,9 @@ func githubAgentAPI(w http.ResponseWriter, r *http.Request) {
 		s.Running = false
 		if err != nil {
 			s.AgentError = err.Error()
-			result = map[string]any{"message": "任务未完成，请检查已有修改后重试。", "files": changedFiles(ctx, ws.Path), "diff": gitDiff(ctx, ws.Path)}
+			reviewCtx, reviewCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer reviewCancel()
+			result = map[string]any{"message": "任务未完成，请检查已有修改后重试。", "files": changedFiles(reviewCtx, ws.Path), "diff": gitDiff(reviewCtx, ws.Path)}
 		}
 		ws.LastResult = result
 	}()
@@ -549,15 +552,24 @@ type githubToolCall struct {
 func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt string) (map[string]any, error) {
 	root := ws.Path
 	tools := []any{
-		map[string]any{"type": "function", "function": map[string]any{"name": "list_files", "description": "List files in the project", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "additionalProperties": false}}},
-		map[string]any{"type": "function", "function": map[string]any{"name": "read_file", "description": "Read a text file", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}, "additionalProperties": false}}},
+		map[string]any{"type": "function", "function": map[string]any{"name": "list_files", "description": "List one directory, starting at path '.' for the root. Directories end with '/'. Use next_offset as offset for another page, or choose a subdirectory. Returns at most 100 entries.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}}, "additionalProperties": false}}},
+		map[string]any{"type": "function", "function": map[string]any{"name": "read_file", "description": "Read up to 16 KiB of a text file. Large files return content and next_offset; pass that byte offset to continue.", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}}, "required": []string{"path"}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "write_file", "description": "Write a text file to implement the requested change", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"path", "content"}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "git_diff", "description": "Show current changes", "parameters": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}},
 	}
 	messages := []any{map[string]any{"role": "system", "content": "You are a careful coding agent. Work only inside the selected repository. Inspect files before editing. Use write_file for requested changes. Never modify .git or secrets. Explain the changes when done. You cannot execute commands or run tests; do not claim tests passed."}}
-	messages = append(messages, ws.History...)
+	history := ws.History
+	for len(history) > 0 {
+		b, _ := json.Marshal(history)
+		if len(b) <= 16<<10 {
+			break
+		}
+		history = history[2:]
+	}
+	messages = append(messages, history...)
 	messages = append(messages, map[string]any{"role": "user", "content": prompt})
-	for step := 0; step < 10; step++ {
+	for step := 0; step < 32; step++ {
+		messages = boundGitHubAgentMessages(messages)
 		body := map[string]any{"model": model, "messages": messages, "tools": tools, "tool_choice": "auto", "stream": false}
 		b, _ := json.Marshal(body)
 		req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(b)).WithContext(ctx)
@@ -617,18 +629,51 @@ func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt stri
 	return nil, errors.New("修改步骤过多，请缩小任务范围")
 }
 
+// Keep complete assistant/tool exchanges together when removing old context. Removing only a tool message would leave an unanswered tool call in the model request.
+func boundGitHubAgentMessages(messages []any) []any {
+	for {
+		b, _ := json.Marshal(messages)
+		if len(b) <= 80<<10 {
+			return messages
+		}
+		removed := false
+		for i := 1; i < len(messages); i++ {
+			message, _ := messages[i].(map[string]any)
+			if message["role"] != "assistant" || message["tool_calls"] == nil {
+				continue
+			}
+			end := i + 1
+			for end < len(messages) {
+				m, _ := messages[end].(map[string]any)
+				if m["role"] != "tool" {
+					break
+				}
+				end++
+			}
+			if end == i+1 {
+				continue
+			}
+			messages = append(messages[:i], messages[end:]...)
+			removed = true
+			break
+		}
+		if !removed {
+			return messages
+		}
+	}
+}
+
 func githubToolResult(root string, call githubToolCall) string {
-	var in struct{ Path, Content string }
-	if err := json.Unmarshal(call.Arguments, &in); err != nil {
+	var in struct {
+		Path, Content string
+		Offset        int
+	}
+	if err := json.Unmarshal(call.Arguments, &in); err != nil || in.Offset < 0 {
 		return "invalid tool arguments"
 	}
 	switch call.Name {
 	case "list_files":
-		files, err := workspaceFiles(root, 6)
-		if err != nil {
-			return err.Error()
-		}
-		return strings.Join(files, "\n")
+		return workspaceDirectoryPage(root, in.Path, in.Offset)
 	case "read_file":
 		p, err := safeWorkspacePath(root, in.Path)
 		if err != nil {
@@ -645,9 +690,27 @@ func githubToolResult(root string, call githubToolCall) string {
 			return "cannot read file"
 		}
 		defer f.Close()
-		b, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
-		if err != nil || len(b) > 1<<20 {
+		if _, err := f.Seek(int64(in.Offset), io.SeekStart); err != nil {
+			return "cannot read file offset"
+		}
+		const chunkSize = 16 << 10
+		b, err := io.ReadAll(io.LimitReader(f, chunkSize+1))
+		if err != nil {
 			return "cannot read file"
+		}
+		if len(b) > chunkSize {
+			cut := chunkSize
+			for cut > 0 && !utf8.RuneStart(b[cut]) {
+				cut--
+			}
+			if cut == 0 || !utf8.Valid(b[:cut]) {
+				return "file is not UTF-8 text"
+			}
+			out, _ := json.Marshal(map[string]any{"content": string(b[:cut]), "next_offset": in.Offset + cut})
+			return string(out)
+		}
+		if !utf8.Valid(b) {
+			return "file is not UTF-8 text"
 		}
 		return string(b)
 	case "write_file":
@@ -672,10 +735,66 @@ func githubToolResult(root string, call githubToolCall) string {
 		}
 		return "written"
 	case "git_diff":
-		return gitDiff(context.Background(), root)
+		diff := gitDiff(context.Background(), root)
+		if len(diff) > 16<<10 {
+			diff = diff[:16<<10] + "\n[Diff truncated for model input. Read individual changed files for details; the review UI retains the full diff.]"
+		}
+		return diff
 	default:
 		return "unknown tool"
 	}
+}
+
+func workspaceDirectoryPage(root, name string, offset int) string {
+	if name == "" {
+		name = "."
+	}
+	if name != "." {
+		p, err := safeWorkspacePath(root, name)
+		if err != nil {
+			return err.Error()
+		}
+		name, _ = filepath.Rel(root, p)
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return "cannot open workspace"
+	}
+	defer r.Close()
+	entries, err := fs.ReadDir(r.FS(), filepath.ToSlash(name))
+	if err != nil {
+		return "cannot list directory"
+	}
+	files := []string{}
+	for _, entry := range entries {
+		p := filepath.Join(name, entry.Name())
+		if _, err := workspaceFileName(p); err != nil || entry.Type()&os.ModeSymlink != 0 || (!entry.IsDir() && !entry.Type().IsRegular()) {
+			continue
+		}
+		p = filepath.ToSlash(p)
+		if entry.IsDir() {
+			p += "/"
+		}
+		files = append(files, p)
+	}
+	if offset > len(files) {
+		return "directory offset is out of range"
+	}
+	end, bytes := offset, 0
+	for end < len(files) && end-offset < 100 {
+		size := len(files[end])
+		if bytes+size > 12<<10 {
+			break
+		}
+		bytes += size
+		end++
+	}
+	out := map[string]any{"entries": files[offset:end]}
+	if end < len(files) {
+		out["next_offset"] = end
+	}
+	b, _ := json.Marshal(out)
+	return string(b)
 }
 
 func changedFiles(ctx context.Context, root string) []string {
