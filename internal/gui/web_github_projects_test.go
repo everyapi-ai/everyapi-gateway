@@ -1,15 +1,25 @@
 package gui
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/yetone/magpie/internal/gateway"
+	"github.com/yetone/magpie/internal/provider"
 )
 
 func TestGitDiffIncludesUntrackedFiles(t *testing.T) {
@@ -29,6 +39,291 @@ func TestGitDiffIncludesUntrackedFiles(t *testing.T) {
 	diff := gitDiff(context.Background(), root)
 	if !strings.Contains(diff, "new content") || !strings.Contains(diff, "new.txt") {
 		t.Fatalf("untracked file missing from diff: %q", diff)
+	}
+}
+
+func githubTestRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"config", "user.name", "Test"}, {"config", "user.email", "test@example.com"}} {
+		if err := gitRun(context.Background(), root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "read me.txt"), []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitRun(context.Background(), root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitRun(context.Background(), root, "commit", "-qm", "Initial"); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestGitHubChangedFilesPreservesPaths(t *testing.T) {
+	root := githubTestRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "read me.txt"), []byte("after\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := changedFiles(context.Background(), root); !reflect.DeepEqual(got, []string{"read me.txt"}) {
+		t.Fatalf("changed files = %q", got)
+	}
+	if err := gitRun(context.Background(), root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gitDiff(context.Background(), root), "+after") {
+		t.Fatal("staged changes disappeared from the review diff")
+	}
+}
+
+func TestGitHubToolsRejectMetadataAndSymlinks(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{filepath.Join(root, ".git", "config"), filepath.Join(outside, "private.txt")} {
+		if err := os.WriteFile(file, []byte("private fixture\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(".git", filepath.Join(root, "metadata")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"../private.txt", ".git/config", "escape/private.txt", "escape/new.txt", "metadata/config"} {
+		for _, tool := range []string{"read_file", "write_file"} {
+			args, _ := json.Marshal(map[string]string{"path": name, "content": "overwritten"})
+			got := githubToolResult(root, githubToolCall{Name: tool, Arguments: args})
+			if got == "written" || strings.Contains(got, "private fixture") {
+				t.Errorf("%s accessed %q: %s", tool, name, got)
+			}
+		}
+	}
+	files, err := workspaceFiles(root, 6)
+	if err != nil || len(files) != 0 {
+		t.Errorf("file listing exposed protected paths: %q, %v", files, err)
+	}
+	args := json.RawMessage(`{"path":"src/new.txt","content":"safe"}`)
+	if got := githubToolResult(root, githubToolCall{Name: "write_file", Arguments: args}); got != "written" {
+		t.Fatalf("normal nested write failed: %s", got)
+	}
+}
+
+type githubTestTransport func(*http.Request) (*http.Response, error)
+
+func (f githubTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestGitHubPullRequestRetriesCommittedChanges(t *testing.T) {
+	root := githubTestRepo(t)
+	remote := t.TempDir()
+	if err := gitRun(context.Background(), remote, "init", "--bare", "-q"); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitRun(context.Background(), root, "remote", "add", "origin", remote); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "read me.txt"), []byte("after\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &githubSession{Token: "fixture", Username: "tester", Expires: time.Now().Add(time.Hour), Workspace: &githubWorkspace{Repo: "everyapi-ai/test", Ref: "main", Path: root}}
+	id := t.Name()
+	githubSessions.Store(id, s)
+	t.Cleanup(func() { githubSessions.Delete(id) })
+	old := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = old })
+	calls := 0
+	http.DefaultTransport = githubTestTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.github.com" || r.URL.Path != "/repos/everyapi-ai/test/pulls" {
+			t.Fatalf("unexpected network request: %s %s", r.Method, r.URL)
+		}
+		if r.Method == http.MethodGet {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("[]")), Header: make(http.Header)}, nil
+		}
+		calls++
+		code, body := 201, `{"html_url":"https://github.com/everyapi-ai/test/pull/1","number":1}`
+		if calls == 1 {
+			code, body = 502, `{"message":"injected failure after git push"}`
+		}
+		return &http.Response{StatusCode: code, Status: http.StatusText(code), Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+	for i, want := range []int{502, 200, 200} {
+		req := httptest.NewRequest(http.MethodPost, "/api/github/pull-request", strings.NewReader(`{"title":"Update documentation","body":"A test change"}`))
+		req.AddCookie(&http.Cookie{Name: githubSessionCookie, Value: id})
+		rec := httptest.NewRecorder()
+		githubPullRequestAPI(rec, req)
+		if rec.Code != want {
+			t.Fatalf("attempt %d = %d %s, want %d", i, rec.Code, rec.Body.String(), want)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("repeated request created another PR: %d calls", calls)
+	}
+	if n, err := gitRunOutput(context.Background(), root, "rev-list", "--count", "HEAD"); err != nil || strings.TrimSpace(n) != "2" {
+		t.Fatalf("retry made duplicate commits: %q, %v", n, err)
+	}
+}
+
+func TestGitHubAgentResumesAfterBrowserDisconnect(t *testing.T) {
+	gitPath := os.Getenv("PATH")
+	sandboxHome(t)
+	t.Setenv("PATH", gitPath)
+	root := githubTestRepo(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	var released sync.Once
+	var calls atomic.Int32
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []map[string]any `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		n := calls.Add(1)
+		if n == 1 {
+			close(started)
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				t.Error("the task inherited the browser request cancellation")
+				return
+			}
+		}
+		if n > 1 {
+			found := false
+			for _, message := range body.Messages {
+				if toolCalls, ok := message["tool_calls"].([]any); ok {
+					for _, item := range toolCalls {
+						if item.(map[string]any)["type"] != "function" {
+							t.Error("assistant tool call lost its type on the next model request")
+						}
+					}
+					found = true
+				}
+			}
+			if !found {
+				t.Error("model did not receive the previous tool calls")
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		message := map[string]any{"role": "assistant", "content": "Updated the file."}
+		if n <= 2 {
+			name, arguments := "read_file", `{"path":"read me.txt"}`
+			if n == 2 {
+				name, arguments = "write_file", `{"path":"read me.txt","content":"after\n"}`
+			}
+			message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": fmt.Sprintf("call-%d", n), "type": "function", "function": map[string]any{"name": name, "arguments": arguments}}}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": message, "finish_reason": "stop"}}})
+	}))
+	t.Cleanup(up.Close)
+	t.Cleanup(func() { released.Do(func() { close(release) }) })
+	if err := provider.Save(provider.Provider{ID: "everyapi", Name: "EveryAPI", Chat: up.URL, Key: "fixture", Models: []string{"test"}}); err != nil {
+		t.Fatal(err)
+	}
+	old := served.Swap(gateway.New())
+	t.Cleanup(func() { served.Store(old) })
+	id := t.Name()
+	s := &githubSession{Token: "fixture", Expires: time.Now().Add(time.Hour), Workspace: &githubWorkspace{Repo: "everyapi-ai/test", Ref: "main", Path: root}}
+	githubSessions.Store(id, s)
+	t.Cleanup(func() { githubSessions.Delete(id) })
+	request := func(method, path, body string) *http.Request {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.AddCookie(&http.Cookie{Name: githubSessionCookie, Value: id})
+		return r
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	w := httptest.NewRecorder()
+	githubAgentAPI(w, request(http.MethodPost, "/api/github/agent", `{"model":"everyapi/test","prompt":"Update the file."}`).WithContext(ctx))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("task was not accepted asynchronously: %d %s", w.Code, w.Body.String())
+	}
+	cancel()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the model request never started")
+	}
+	busy := httptest.NewRecorder()
+	githubSelectWorkspaceAPI(busy, request(http.MethodPost, "/api/github/workspace", `{"repo":"everyapi-ai/other"}`))
+	if busy.Code != http.StatusConflict {
+		t.Fatalf("switching projects during a task = %d", busy.Code)
+	}
+	released.Do(func() { close(release) })
+	deadline := time.After(5 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		status := httptest.NewRecorder()
+		githubAgentStatusAPI(status, request(http.MethodGet, "/api/github/agent", ""))
+		var job struct {
+			Running bool           `json:"running"`
+			Error   string         `json:"error"`
+			Result  map[string]any `json:"result"`
+		}
+		if err := json.Unmarshal(status.Body.Bytes(), &job); err != nil {
+			t.Fatal(err)
+		}
+		if !job.Running {
+			if job.Error != "" || job.Result == nil || !strings.Contains(fmt.Sprint(job.Result["diff"]), "+after") {
+				t.Fatalf("resumed task did not produce its diff: %s", status.Body.String())
+			}
+			break
+		}
+		select {
+		case <-tick.C:
+		case <-deadline:
+			t.Fatal("task did not finish")
+		}
+	}
+	current := httptest.NewRecorder()
+	githubWorkspaceAPI(current, request(http.MethodGet, "/api/github/workspace", ""))
+	if !strings.Contains(current.Body.String(), "Update the file.") || !strings.Contains(current.Body.String(), "Updated the file.") {
+		t.Fatalf("refresh lost the prompt or result: %s", current.Body.String())
+	}
+}
+
+func TestGitHubReposPaginatesWritableProjects(t *testing.T) {
+	id := t.Name()
+	githubSessions.Store(id, &githubSession{Token: "fixture", Username: "tester", Expires: time.Now().Add(time.Hour)})
+	t.Cleanup(func() { githubSessions.Delete(id) })
+	old := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = old })
+	pages := 0
+	http.DefaultTransport = githubTestTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.github.com" || r.URL.Path != "/user/repos" {
+			t.Fatalf("unexpected repository request: %s", r.URL)
+		}
+		pages++
+		var repos []map[string]any
+		if r.URL.Query().Get("page") == "1" {
+			for i := range 100 {
+				repos = append(repos, map[string]any{"full_name": fmt.Sprintf("yldm-tech/repo%d", i), "permissions": map[string]bool{"push": i != 99}, "archived": i == 98})
+			}
+		} else {
+			repos = []map[string]any{{"full_name": "everyapi-ai/last", "permissions": map[string]bool{"push": true}}}
+		}
+		b, _ := json.Marshal(repos)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(b)), Header: make(http.Header)}, nil
+	})
+	r := httptest.NewRequest(http.MethodGet, "/api/github/repos", nil)
+	r.AddCookie(&http.Cookie{Name: githubSessionCookie, Value: id})
+	w := httptest.NewRecorder()
+	githubReposAPI(w, r)
+	var out struct {
+		Repos []struct {
+			FullName string `json:"full_name"`
+		} `json:"repos"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != 200 || len(out.Repos) != 99 || pages != 2 {
+		t.Fatalf("paginated projects: status=%d count=%d pages=%d error=%v", w.Code, len(out.Repos), pages, err)
+	}
+	if out.Repos[0].FullName != "yldm-tech/repo0" || out.Repos[len(out.Repos)-1].FullName != "everyapi-ai/last" {
+		t.Fatal("accessible repositories across organizations were lost")
 	}
 }
 

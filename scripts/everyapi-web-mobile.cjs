@@ -71,17 +71,10 @@ module.exports = async function mobile(browser, address, admin, client, upstream
         await fits(page, 'dialog.everyapi-install');
         await page.locator('dialog.everyapi-install button').tap();
         await page.locator('dialog.everyapi-install').waitFor({ state: 'detached' });
-        await page.locator('#nav [data-view=providers]').tap();
-        await page.locator('#everyapiConfig').waitFor();
-        await fits(page, '#everyapiConfig');
-        const providerKey = page.locator('#everyapiAPIKey');
-        await providerKey.fill(upstreamKey);
-        assert(await providerKey.evaluate(node => parseFloat(getComputedStyle(node).fontSize) >= 16));
-        // Magpie preserves reading position against scripted auto-scroll. A trusted scroll key reaches the actions before the touch tap, including mobile WebKit without mouse-wheel support.
-        await page.locator('#view-providers').press('End');
-        const [refreshed] = await Promise.all([page.waitForResponse(r => new URL(r.url()).pathname === '/api/everyapi/models', { timeout: 20000 }), page.getByRole('button', { name: lang === 'zh' ? '保存并刷新模型' : 'Save and refresh models', exact: true }).tap({ timeout: 20000 })]);
-        assert.equal(refreshed.status(), 200);
-        await page.locator('#everyapiConfig input[name=models]').waitFor();
+        if (width <= 560) assert.equal(await page.locator('#nav [data-view=providers]').isVisible(), false, 'EveryAPI configuration tab is visible on a phone');
+        await page.locator('.everyapi-chat-form').waitFor();
+        await fits(page, '#view-sessions');
+        assert(await page.locator('.everyapi-chat-input').evaluate(node => parseFloat(getComputedStyle(node).fontSize) >= 16));
         assert.equal(await page.locator('#addProvider').isVisible(), false);
         assert.equal(await page.locator('#nav [data-view=plugins]').isVisible(), false);
         assert.equal(await page.locator('#nav [data-view=routing]').isVisible(), false);
@@ -125,8 +118,8 @@ module.exports = async function mobile(browser, address, admin, client, upstream
         await page.locator('a').tap();
         await page.locator('input[name=key]').waitFor();
         assert.deepEqual(errors, [], 'mobile browser threw JavaScript errors');
-        console.log(`PASS: mobile ${lang} ${width}x${height}, sign-in, touch navigation, provider save/discovery, install help, restart-free offline/reconnect and cache isolation`);
-      } catch (error) { if (page) { await page.screenshot({ path: `dist/everyapi-only-failure-${lang}-${width}.png` }); console.error("Mobile form diagnostics", await page.locator("#everyapiConfig").evaluate(form => ({ valid: form.checkValidity(), buttons: [...form.querySelectorAll("button")].map(button => ({ text: button.textContent, disabled: button.disabled, rect: button.getBoundingClientRect().toJSON() })) }))); } throw error; } finally { await context.close(); }
+        console.log(`PASS: mobile ${lang} ${width}x${height}, sign-in, Sessions composer, touch navigation, hidden phone configuration, install help, offline/reconnect and cache isolation`);
+      } catch (error) { if (page) await page.screenshot({ path: `dist/everyapi-only-failure-${lang}-${width}.png` }); throw error; } finally { await context.close(); }
     }
   }
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1' });

@@ -95,7 +95,7 @@ async function main() {
     await page.goto(address);
     await page.locator('input[name=key]').fill(admin);
     await page.locator('button[type=submit]').click();
-    await page.waitForFunction(() => document.body?.classList.contains('gateway-mode') && document.querySelector('#everyapiConfig'));
+    await page.waitForFunction(() => document.body?.classList.contains('gateway-mode') && document.querySelector('.everyapi-chat-form'));
     assert.equal(await page.title(), 'EveryAPI Gateway');
     assert.equal(await page.locator('.brand').innerText(), 'EveryAPI Gateway');
     assert.equal(await page.locator('[data-view=agents]').isVisible(), false, 'server showed local-agent controls');
@@ -104,6 +104,7 @@ async function main() {
     assert.equal(state.noAccountDiscovery, true);
     assert.equal(state.noAutoUpdate, true);
     // Configure the single EveryAPI connection through its real UI, from a blank-key install.
+    await page.locator('#nav [data-view=providers]').click();
     await page.locator('#everyapiAPIKey').fill(upstreamKey);
     const fetched = page.waitForResponse(r => new URL(r.url()).pathname === '/api/everyapi/models');
     await page.getByRole('button', { name: 'Save and refresh models', exact: true }).click();
@@ -133,6 +134,7 @@ async function main() {
     });
     assert.equal(relay.status, 200);
     assert.equal((await relay.json()).choices[0].message.content, 'smoke passed');
+    await require('./everyapi-web-projects.cjs')(browser, page, address);
     await page.locator('[data-view=gateway]').click();
     await page.locator('#view-gateway').waitFor({ state: 'visible' });
     await page.waitForFunction(key => document.querySelector('#connect .snip')?.textContent.includes(key), client);

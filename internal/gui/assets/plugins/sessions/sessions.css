@@ -29,6 +29,7 @@
 .everyapi-chat-send { flex: none; width: 42px; height: 42px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 18px; }
 .everyapi-chat-send:disabled { opacity: .5; }
 @media (max-width: 560px) { .everyapi-chat-page { height: auto; padding: 12px; } .everyapi-project-row { flex-wrap: wrap; } .everyapi-project-select { flex-basis: 100%; } .everyapi-github-config { grid-template-columns: 1fr; } .everyapi-github-config strong, .everyapi-github-config-hint { grid-column: auto; } .everyapi-github-config-save { width: 100%; } .everyapi-chat-msg { max-width: 92%; } }
+@media (max-width: 560px) { .everyapi-chat-model, .everyapi-project-select, .everyapi-github-config-input { font-size: 16px; min-height: 44px; } .everyapi-project-auth, .everyapi-project-pr { min-height: 44px; } }
 .sm-head { gap: 8px; height: auto; min-height: 34px; }
 .sm-switch { min-width: 0; flex: 1; display: flex; align-items: center; }
 .sm-agents { min-width: 0; max-width: 100%; }

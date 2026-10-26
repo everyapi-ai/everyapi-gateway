@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -26,17 +27,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yetone/magpie/internal/proc"
 	"github.com/yetone/magpie/internal/settings"
 )
 
 type githubSession struct {
+	mu              sync.Mutex
 	Token, Username string
 	Expires         time.Time
 	Workspace       *githubWorkspace
+	Running         bool
+	AgentError      string
 }
 
 type githubWorkspace struct {
 	Repo, Ref, Path string
+	Branch          string
+	PullRequest     map[string]any
+	LastPrompt      string
+	LastResult      map[string]any
+	History         []any
 }
 
 var githubSessions sync.Map // session id -> *githubSession
@@ -69,15 +79,20 @@ func githubProjectRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/github/workspace", githubWorkspaceAPI)
 	mux.HandleFunc("POST /api/github/workspace", githubSelectWorkspaceAPI)
 	mux.HandleFunc("POST /api/github/agent", githubAgentAPI)
+	mux.HandleFunc("GET /api/github/agent", githubAgentStatusAPI)
 	mux.HandleFunc("POST /api/github/pull-request", githubPullRequestAPI)
 }
 
-func githubStatusAPI(w http.ResponseWriter, _ *http.Request) {
+func githubStatusAPI(w http.ResponseWriter, r *http.Request) {
 	cfg := loadWebGitHubConfig()
-	writeJSON(w, map[string]any{"configured": cfg.enabled(), "organization": cfg.Organization})
+	writeJSON(w, map[string]any{"configured": cfg.enabled(), "organization": cfg.Organization, "callback_url": githubCallbackURL(r), "managed": strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_OAUTH_CLIENT_ID")) != "" || strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_ID")) != ""})
 }
 
 func githubConfigAPI(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_OAUTH_CLIENT_ID")) != "" || strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_ID")) != "" {
+		http.Error(w, "GitHub OAuth 由部署配置管理，请更新部署中的凭据", http.StatusConflict)
+		return
+	}
 	var in githubOAuthStoredConfig
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 	dec.DisallowUnknownFields()
@@ -107,17 +122,34 @@ func githubReposAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	var repos []struct {
+	type repository struct {
 		FullName      string `json:"full_name"`
 		Name          string `json:"name"`
 		Private       bool   `json:"private"`
 		DefaultBranch string `json:"default_branch"`
 		Description   string `json:"description"`
 		Updated       string `json:"updated_at"`
+		Archived      bool   `json:"archived"`
+		Permissions   struct {
+			Push bool `json:"push"`
+		} `json:"permissions"`
 	}
-	if err := githubJSON(ctx, s.Token, http.MethodGet, "https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner%2Ccollaborator%2Corganization_member", nil, &repos); err != nil {
-		http.Error(w, "无法读取 GitHub 项目列表", http.StatusBadGateway)
-		return
+	repos := []repository{}
+	for page := 1; ; page++ {
+		var batch []repository
+		endpoint := fmt.Sprintf("https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner%%2Ccollaborator%%2Corganization_member&page=%d", page)
+		if err := githubJSON(ctx, s.Token, http.MethodGet, endpoint, nil, &batch); err != nil {
+			http.Error(w, "无法读取 GitHub 项目列表", http.StatusBadGateway)
+			return
+		}
+		for _, repo := range batch {
+			if repo.Permissions.Push && !repo.Archived {
+				repos = append(repos, repo)
+			}
+		}
+		if len(batch) < 100 {
+			break
+		}
 	}
 	writeJSON(w, map[string]any{"user": s.Username, "repos": repos})
 }
@@ -128,18 +160,29 @@ func githubWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请先授权 GitHub", http.StatusUnauthorized)
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.Workspace == nil {
 		writeJSON(w, map[string]any{"selected": false})
 		return
 	}
-	files, _ := workspaceFiles(s.Workspace.Path, 2)
-	writeJSON(w, map[string]any{"selected": true, "repo": s.Workspace.Repo, "ref": s.Workspace.Ref, "files": files})
+	ws := s.Workspace
+	writeJSON(w, map[string]any{"selected": true, "repo": ws.Repo, "ref": ws.Ref, "prompt": ws.LastPrompt, "result": ws.LastResult, "pull_request": ws.PullRequest, "running": s.Running, "error": s.AgentError})
 }
 
 func githubSelectWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 	s, ok := githubSessionFor(r)
 	if !ok {
 		http.Error(w, "请先授权 GitHub", http.StatusUnauthorized)
+		return
+	}
+	if !s.mu.TryLock() {
+		http.Error(w, "项目正在处理其他请求，请稍后重试", http.StatusConflict)
+		return
+	}
+	defer s.mu.Unlock()
+	if s.Running {
+		http.Error(w, "项目正在修改中，请完成后再切换", http.StatusConflict)
 		return
 	}
 	var in struct {
@@ -153,6 +196,14 @@ func githubSelectWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 	if in.Ref == "" {
 		in.Ref = "main"
 	}
+	if s.Workspace != nil && s.Workspace.Repo == in.Repo && s.Workspace.Ref == in.Ref {
+		writeJSON(w, map[string]any{"selected": true, "repo": in.Repo, "ref": in.Ref})
+		return
+	}
+	if s.Workspace != nil && (len(changedFiles(r.Context(), s.Workspace.Path)) > 0 || (s.Workspace.Branch != "" && s.Workspace.PullRequest == nil)) {
+		http.Error(w, "当前项目有未提交修改，请先创建 Pull Request", http.StatusConflict)
+		return
+	}
 	base := filepath.Join(githubWorkspaceRoot(), safeWorkspaceID(in.Repo))
 	if err := os.RemoveAll(base); err != nil {
 		http.Error(w, "无法清理项目工作区", http.StatusInternalServerError)
@@ -163,6 +214,7 @@ func githubSelectWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := gitClone(r.Context(), s.Token, "https://github.com/"+in.Repo+".git", in.Ref, base); err != nil {
+		_ = os.RemoveAll(base)
 		http.Error(w, "无法克隆 GitHub 项目: "+err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -177,6 +229,15 @@ func githubAgentAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请先授权 GitHub", http.StatusUnauthorized)
 		return
 	}
+	if !s.mu.TryLock() {
+		http.Error(w, "项目正在处理其他请求，请稍后重试", http.StatusConflict)
+		return
+	}
+	defer s.mu.Unlock()
+	if s.Running {
+		http.Error(w, "项目正在修改中，请等待当前任务完成", http.StatusConflict)
+		return
+	}
 	if s.Workspace == nil {
 		http.Error(w, "请先选择 GitHub 项目", http.StatusBadRequest)
 		return
@@ -189,18 +250,56 @@ func githubAgentAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "模型和修改要求不能为空", http.StatusBadRequest)
 		return
 	}
-	result, err := runGitHubAgent(r.Context(), s.Workspace.Path, in.Model, in.Prompt)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+	ws := s.Workspace
+	ws.LastPrompt, ws.LastResult = in.Prompt, nil
+	s.Running, s.AgentError = true, ""
+	// A mobile browser can disconnect while the model works. Keep the bounded task on the server and expose its result through GET so a refresh resumes it.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		result, err := runGitHubAgent(ctx, ws, in.Model, in.Prompt)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.Running = false
+		if err != nil {
+			s.AgentError = err.Error()
+			result = map[string]any{"message": "任务未完成，请检查已有修改后重试。", "files": changedFiles(ctx, ws.Path), "diff": gitDiff(ctx, ws.Path)}
+		}
+		ws.LastResult = result
+	}()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	writeJSON(w, map[string]any{"running": true})
+}
+
+func githubAgentStatusAPI(w http.ResponseWriter, r *http.Request) {
+	s, ok := githubSessionFor(r)
+	if !ok {
+		http.Error(w, "请先授权 GitHub", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(w, result)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result map[string]any
+	if s.Workspace != nil {
+		result = s.Workspace.LastResult
+	}
+	writeJSON(w, map[string]any{"running": s.Running, "error": s.AgentError, "result": result})
 }
 
 func githubPullRequestAPI(w http.ResponseWriter, r *http.Request) {
 	s, ok := githubSessionFor(r)
 	if !ok {
 		http.Error(w, "请先授权 GitHub", http.StatusUnauthorized)
+		return
+	}
+	if !s.mu.TryLock() {
+		http.Error(w, "项目正在处理其他请求，请稍后重试", http.StatusConflict)
+		return
+	}
+	defer s.mu.Unlock()
+	if s.Running {
+		http.Error(w, "项目正在修改中，请完成后再创建 Pull Request", http.StatusConflict)
 		return
 	}
 	if s.Workspace == nil {
@@ -215,24 +314,47 @@ func githubPullRequestAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Pull Request 标题不能为空", http.StatusBadRequest)
 		return
 	}
-	branch := "everyapi/" + time.Now().UTC().Format("20060102-150405") + "-" + randomShortID()
-	if err := gitRun(r.Context(), s.Workspace.Path, "checkout", "-b", branch); err != nil {
-		http.Error(w, "无法创建修改分支", http.StatusBadGateway)
+	ws := s.Workspace
+	out, err := gitRunOutput(r.Context(), ws.Path, "status", "--porcelain")
+	if err != nil {
+		http.Error(w, "无法检查项目修改", http.StatusBadGateway)
 		return
 	}
-	if out, err := gitRunOutput(r.Context(), s.Workspace.Path, "status", "--porcelain"); err != nil || strings.TrimSpace(out) == "" {
+	dirty := out != ""
+	if !dirty && ws.PullRequest != nil {
+		writeJSON(w, ws.PullRequest)
+		return
+	}
+	if !dirty && ws.Branch == "" {
 		http.Error(w, "当前项目没有待提交修改", http.StatusBadRequest)
 		return
 	}
-	if gitRun(r.Context(), s.Workspace.Path, "config", "user.name", "EveryAPI Gateway") != nil || gitRun(r.Context(), s.Workspace.Path, "config", "user.email", "gateway@everyapi.ai") != nil || gitRun(r.Context(), s.Workspace.Path, "add", "--all") != nil || gitRun(r.Context(), s.Workspace.Path, "commit", "-m", in.Title) != nil || gitPush(r.Context(), s.Token, s.Workspace.Path, branch) != nil {
+	if ws.Branch == "" {
+		branch := "everyapi/" + time.Now().UTC().Format("20060102-150405") + "-" + randomShortID()
+		if err := gitRun(r.Context(), ws.Path, "checkout", "-b", branch); err != nil {
+			http.Error(w, "无法创建修改分支", http.StatusBadGateway)
+			return
+		}
+		ws.Branch = branch
+	}
+	if dirty && (gitRun(r.Context(), ws.Path, "config", "user.name", "EveryAPI Gateway") != nil || gitRun(r.Context(), ws.Path, "config", "user.email", "gateway@everyapi.ai") != nil || gitRun(r.Context(), ws.Path, "add", "--all") != nil || gitRun(r.Context(), ws.Path, "commit", "-m", in.Title) != nil) {
+		http.Error(w, "无法提交项目修改，可以重试", http.StatusBadGateway)
+		return
+	}
+	if gitPush(r.Context(), s.Token, ws.Path, ws.Branch) != nil {
 		http.Error(w, "无法推送修改到 GitHub", http.StatusBadGateway)
 		return
 	}
-	pr, err := githubCreatePR(r.Context(), s.Token, s.Workspace.Repo, map[string]string{"title": in.Title, "body": in.Body, "head": branch, "base": s.Workspace.Ref})
+	if ws.PullRequest != nil {
+		writeJSON(w, ws.PullRequest)
+		return
+	}
+	pr, err := githubCreatePR(r.Context(), s.Token, ws.Repo, map[string]string{"title": in.Title, "body": in.Body, "head": ws.Branch, "base": ws.Ref})
 	if err != nil {
 		http.Error(w, "无法创建 Pull Request", http.StatusBadGateway)
 		return
 	}
+	ws.PullRequest = pr
 	writeJSON(w, pr)
 }
 
@@ -281,27 +403,42 @@ func githubJSON(ctx context.Context, token, method, endpoint string, body any, o
 func githubCreatePR(ctx context.Context, token, repo string, body map[string]string) (map[string]any, error) {
 	out := map[string]any{}
 	err := githubJSON(ctx, token, http.MethodPost, "https://api.github.com/repos/"+url.PathEscape(strings.Split(repo, "/")[0])+"/"+url.PathEscape(strings.Split(repo, "/")[1])+"/pulls", body, &out)
+	if err != nil {
+		// A successful creation may have lost its response; a retry must return the existing PR rather than stay stuck on GitHub's duplicate-head error.
+		q := url.Values{"head": {strings.Split(repo, "/")[0] + ":" + body["head"]}, "base": {body["base"]}, "state": {"open"}}
+		var existing []map[string]any
+		if lookupErr := githubJSON(ctx, token, http.MethodGet, "https://api.github.com/repos/"+repo+"/pulls?"+q.Encode(), nil, &existing); lookupErr == nil && len(existing) > 0 {
+			return existing[0], nil
+		}
+	}
 	return out, err
 }
 
 func workspaceFiles(root string, depth int) ([]string, error) {
 	var out []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	err = fs.WalkDir(r.FS(), ".", func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(root, path)
-		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(filepath.Separator)) {
+		if name == "." {
+			return nil
+		}
+		if _, err := workspaceFileName(name); err != nil || d.Type()&os.ModeSymlink != 0 {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if d.IsDir() && strings.Count(filepath.ToSlash(rel), "/") >= depth {
+		if d.IsDir() && strings.Count(name, "/") >= depth {
 			return filepath.SkipDir
 		}
 		if !d.IsDir() {
-			out = append(out, filepath.ToSlash(rel))
+			out = append(out, name)
 		}
 		return nil
 	})
@@ -309,21 +446,48 @@ func workspaceFiles(root string, depth int) ([]string, error) {
 	return out, err
 }
 
-func safeWorkspacePath(root, name string) (string, error) {
+func workspaceFileName(name string) (string, error) {
 	name = filepath.Clean(filepath.FromSlash(name))
-	if name == "." || filepath.IsAbs(name) || name == ".." || strings.HasPrefix(name, ".."+string(filepath.Separator)) {
+	if !filepath.IsLocal(name) || name == "." {
 		return "", errors.New("invalid file path")
 	}
-	p := filepath.Join(root, name)
-	r, err := filepath.Rel(root, p)
-	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-		return "", errors.New("invalid file path")
+	for _, part := range strings.Split(filepath.ToSlash(name), "/") {
+		if strings.EqualFold(part, ".git") {
+			return "", errors.New("refusing to access git metadata")
+		}
 	}
 	base := strings.ToLower(filepath.Base(name))
 	if base == ".env" || strings.HasSuffix(base, ".pem") || strings.HasSuffix(base, ".key") || strings.Contains(base, "secret") || strings.Contains(base, "credential") {
 		return "", errors.New("refusing to access a secret file")
 	}
-	return p, nil
+	return name, nil
+}
+
+func safeWorkspacePath(root, name string) (string, error) {
+	name, err := workspaceFileName(name)
+	if err != nil {
+		return "", err
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return "", err
+	}
+	defer r.Close()
+	current := ""
+	for _, part := range strings.Split(filepath.ToSlash(name), "/") {
+		current = filepath.Join(current, part)
+		info, err := r.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return "", errors.New("refusing to access a symlink or special file")
+		}
+	}
+	return filepath.Join(root, name), nil
 }
 
 func gitAskpass(token string) (string, func()) {
@@ -339,7 +503,7 @@ func gitAskpass(token string) (string, func()) {
 }
 
 func gitCommand(ctx context.Context, root, token string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := proc.CommandContext(ctx, "git", args...)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS_REQUIRE=force", "EVERYAPI_GIT_TOKEN="+token)
 	return cmd
@@ -348,7 +512,7 @@ func gitCommand(ctx context.Context, root, token string, args ...string) *exec.C
 func gitClone(ctx context.Context, token, remote, ref, dest string) error {
 	ask, cleanup := gitAskpass(token)
 	defer cleanup()
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", ref, remote, dest)
+	cmd := proc.CommandContext(ctx, "git", "clone", "--depth", "1", "--branch", ref, remote, dest)
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS_REQUIRE=force", "GIT_ASKPASS="+ask, "EVERYAPI_GIT_TOKEN="+token)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
@@ -382,14 +546,17 @@ type githubToolCall struct {
 	Arguments json.RawMessage
 }
 
-func runGitHubAgent(ctx context.Context, root, model, prompt string) (map[string]any, error) {
+func runGitHubAgent(ctx context.Context, ws *githubWorkspace, model, prompt string) (map[string]any, error) {
+	root := ws.Path
 	tools := []any{
 		map[string]any{"type": "function", "function": map[string]any{"name": "list_files", "description": "List files in the project", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "read_file", "description": "Read a text file", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "write_file", "description": "Write a text file to implement the requested change", "parameters": map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"path", "content"}, "additionalProperties": false}}},
 		map[string]any{"type": "function", "function": map[string]any{"name": "git_diff", "description": "Show current changes", "parameters": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}},
 	}
-	messages := []any{map[string]any{"role": "system", "content": "You are a careful coding agent. Work only inside the selected repository. Inspect files before editing. Use write_file for requested changes. Never modify .git or secrets. Explain the changes when done."}, map[string]any{"role": "user", "content": prompt}}
+	messages := []any{map[string]any{"role": "system", "content": "You are a careful coding agent. Work only inside the selected repository. Inspect files before editing. Use write_file for requested changes. Never modify .git or secrets. Explain the changes when done. You cannot execute commands or run tests; do not claim tests passed."}}
+	messages = append(messages, ws.History...)
+	messages = append(messages, map[string]any{"role": "user", "content": prompt})
 	for step := 0; step < 10; step++ {
 		body := map[string]any{"model": model, "messages": messages, "tools": tools, "tool_choice": "auto", "stream": false}
 		b, _ := json.Marshal(body)
@@ -415,6 +582,7 @@ func runGitHubAgent(ctx context.Context, root, model, prompt string) (map[string
 					Content   string `json:"content"`
 					ToolCalls []struct {
 						ID       string `json:"id"`
+						Type     string `json:"type"`
 						Function struct {
 							Name      string `json:"name"`
 							Arguments string `json:"arguments"`
@@ -433,6 +601,10 @@ func runGitHubAgent(ctx context.Context, root, model, prompt string) (map[string
 			calls = append(calls, githubToolCall{ID: c.ID, Name: c.Function.Name, Arguments: json.RawMessage(c.Function.Arguments)})
 		}
 		if len(calls) == 0 {
+			ws.History = append(ws.History, map[string]any{"role": "user", "content": prompt}, assistant)
+			if len(ws.History) > 20 {
+				ws.History = ws.History[len(ws.History)-20:]
+			}
 			return map[string]any{"message": m.Content, "files": changedFiles(ctx, root), "diff": gitDiff(ctx, root)}, nil
 		}
 		assistant["tool_calls"] = m.ToolCalls
@@ -447,7 +619,9 @@ func runGitHubAgent(ctx context.Context, root, model, prompt string) (map[string
 
 func githubToolResult(root string, call githubToolCall) string {
 	var in struct{ Path, Content string }
-	_ = json.Unmarshal(call.Arguments, &in)
+	if err := json.Unmarshal(call.Arguments, &in); err != nil {
+		return "invalid tool arguments"
+	}
 	switch call.Name {
 	case "list_files":
 		files, err := workspaceFiles(root, 6)
@@ -460,7 +634,18 @@ func githubToolResult(root string, call githubToolCall) string {
 		if err != nil {
 			return err.Error()
 		}
-		b, err := os.ReadFile(p)
+		r, err := os.OpenRoot(root)
+		if err != nil {
+			return "cannot open workspace"
+		}
+		defer r.Close()
+		name, _ := filepath.Rel(root, p)
+		f, err := r.Open(name)
+		if err != nil {
+			return "cannot read file"
+		}
+		defer f.Close()
+		b, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
 		if err != nil || len(b) > 1<<20 {
 			return "cannot read file"
 		}
@@ -470,13 +655,19 @@ func githubToolResult(root string, call githubToolCall) string {
 		if err != nil {
 			return err.Error()
 		}
-		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-			return err.Error()
-		}
 		if len(in.Content) > 2<<20 {
 			return "file too large"
 		}
-		if err := os.WriteFile(p, []byte(in.Content), 0o600); err != nil {
+		r, err := os.OpenRoot(root)
+		if err != nil {
+			return "cannot open workspace"
+		}
+		defer r.Close()
+		name, _ := filepath.Rel(root, p)
+		if err := r.MkdirAll(filepath.Dir(name), 0o700); err != nil {
+			return err.Error()
+		}
+		if err := r.WriteFile(name, []byte(in.Content), 0o600); err != nil {
 			return err.Error()
 		}
 		return "written"
@@ -488,30 +679,32 @@ func githubToolResult(root string, call githubToolCall) string {
 }
 
 func changedFiles(ctx context.Context, root string) []string {
-	out, _ := gitRunOutput(ctx, root, "status", "--porcelain")
+	out, _ := gitRunOutput(ctx, root, "status", "--porcelain", "-z")
 	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	entries := strings.Split(out, "\x00")
+	for i := 0; i < len(entries); i++ {
+		line := entries[i]
 		if len(line) > 3 {
-			files = append(files, strings.TrimSpace(line[3:]))
+			files = append(files, line[3:])
+			if strings.ContainsAny(line[:2], "RC") {
+				i++ // In -z format a rename's old path follows its new path.
+			}
 		}
 	}
 	return files
 }
 func gitDiff(ctx context.Context, root string) string {
-	out, _ := gitRunOutput(ctx, root, "diff", "--", ".")
-	// git diff omits untracked files. Agent-created files are commonly new,
-	// so append their no-index patches as well; otherwise the UI would claim a
-	// file changed while showing an empty diff until the PR was created.
-	if untracked, err := gitRunOutput(ctx, root, "ls-files", "--others", "--exclude-standard"); err == nil {
-		for _, name := range strings.Split(strings.TrimSpace(untracked), "\n") {
-			name = strings.TrimSpace(name)
+	out, _ := gitRunOutput(ctx, root, "diff", "HEAD", "--", ".")
+	// git diff omits untracked files. Append their no-index patches so new files can be reviewed before the PR is created.
+	if untracked, err := gitRunOutput(ctx, root, "ls-files", "--others", "--exclude-standard", "-z"); err == nil {
+		for _, name := range strings.Split(untracked, "\x00") {
 			if name == "" {
 				continue
 			}
 			if _, err := safeWorkspacePath(root, name); err != nil {
 				continue
 			}
-			patch, _ := gitRunOutput(ctx, root, "diff", "--no-index", "--", "/dev/null", name)
+			patch, _ := gitRunOutput(ctx, root, "diff", "--no-index", "--", os.DevNull, name)
 			if patch != "" {
 				out += patch
 			}
