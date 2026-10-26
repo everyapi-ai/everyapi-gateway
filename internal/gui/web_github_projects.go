@@ -470,6 +470,24 @@ func changedFiles(ctx context.Context, root string) []string {
 }
 func gitDiff(ctx context.Context, root string) string {
 	out, _ := gitRunOutput(ctx, root, "diff", "--", ".")
+	// git diff omits untracked files. Agent-created files are commonly new,
+	// so append their no-index patches as well; otherwise the UI would claim a
+	// file changed while showing an empty diff until the PR was created.
+	if untracked, err := gitRunOutput(ctx, root, "ls-files", "--others", "--exclude-standard"); err == nil {
+		for _, name := range strings.Split(strings.TrimSpace(untracked), "\n") {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			if _, err := safeWorkspacePath(root, name); err != nil {
+				continue
+			}
+			patch, _ := gitRunOutput(ctx, root, "diff", "--no-index", "--", "/dev/null", name)
+			if patch != "" {
+				out += patch
+			}
+		}
+	}
 	if len(out) > 1<<20 {
 		return out[:1<<20]
 	}
