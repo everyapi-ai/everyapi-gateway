@@ -64,6 +64,7 @@ func githubProjectRoutes(mux *http.ServeMux) {
 		return
 	}
 	mux.HandleFunc("GET /api/github/status", githubStatusAPI)
+	mux.HandleFunc("POST /api/github/config", githubConfigAPI)
 	mux.HandleFunc("GET /api/github/repos", githubReposAPI)
 	mux.HandleFunc("GET /api/github/workspace", githubWorkspaceAPI)
 	mux.HandleFunc("POST /api/github/workspace", githubSelectWorkspaceAPI)
@@ -74,6 +75,28 @@ func githubProjectRoutes(mux *http.ServeMux) {
 func githubStatusAPI(w http.ResponseWriter, _ *http.Request) {
 	cfg := loadWebGitHubConfig()
 	writeJSON(w, map[string]any{"configured": cfg.enabled(), "organization": cfg.Organization})
+}
+
+func githubConfigAPI(w http.ResponseWriter, r *http.Request) {
+	var in githubOAuthStoredConfig
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		http.Error(w, "GitHub OAuth 配置无效", http.StatusBadRequest)
+		return
+	}
+	in.ClientID = strings.TrimSpace(in.ClientID)
+	in.ClientSecret = strings.TrimSpace(in.ClientSecret)
+	in.Organization = strings.TrimSpace(in.Organization)
+	if !validGitHubConfigValue(in.ClientID) || !validGitHubConfigValue(in.ClientSecret) || !validGitHubConfigValue(in.Organization) {
+		http.Error(w, "Client ID、Client Secret 和组织名不能为空且不能包含空白字符", http.StatusBadRequest)
+		return
+	}
+	if err := saveStoredGitHubConfig(in); err != nil {
+		http.Error(w, "无法保存 GitHub OAuth 配置", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"configured": true, "organization": in.Organization})
 }
 
 func githubReposAPI(w http.ResponseWriter, r *http.Request) {

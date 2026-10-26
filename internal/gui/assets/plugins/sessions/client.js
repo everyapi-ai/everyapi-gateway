@@ -250,6 +250,19 @@ magpie.plugin("sessions", (ctx) => {
     const pr = el("button", "everyapi-project-pr", "创建 Pull Request");
     pr.type = "button"; pr.hidden = true;
     projectRow.append(project, auth, pr);
+    const oauthForm = el("form", "everyapi-github-config");
+    oauthForm.hidden = true;
+    const oauthTitle = el("strong", "", "配置 GitHub OAuth App");
+    const oauthHint = el("span", "everyapi-github-config-hint", "回调地址必须是 https://gateway.everyapi.ai/_github/callback");
+    const oauthID = el("input", "everyapi-github-config-input");
+    oauthID.type = "text"; oauthID.required = true; oauthID.autocomplete = "off"; oauthID.placeholder = "Client ID"; oauthID.setAttribute("aria-label", "GitHub Client ID");
+    const oauthSecret = el("input", "everyapi-github-config-input");
+    oauthSecret.type = "password"; oauthSecret.required = true; oauthSecret.autocomplete = "new-password"; oauthSecret.placeholder = "Client Secret"; oauthSecret.setAttribute("aria-label", "GitHub Client Secret");
+    const oauthOrg = el("input", "everyapi-github-config-input");
+    oauthOrg.type = "text"; oauthOrg.required = true; oauthOrg.autocomplete = "organization"; oauthOrg.value = "everyapi-ai"; oauthOrg.placeholder = "GitHub 组织名"; oauthOrg.setAttribute("aria-label", "GitHub 组织名");
+    const oauthSave = el("button", "everyapi-github-config-save", "保存并继续");
+    oauthSave.type = "submit";
+    oauthForm.append(oauthTitle, oauthHint, oauthID, oauthSecret, oauthOrg, oauthSave);
     const projectStatus = el("p", "everyapi-project-status", "授权 GitHub 后选择项目，网关会在工作区中修改代码。");
     const messages = el("div", "everyapi-chat-messages");
     const empty = el("div", "everyapi-chat-empty", "选择模型后，在下方输入消息。");
@@ -260,7 +273,7 @@ magpie.plugin("sessions", (ctx) => {
     const send = el("button", "everyapi-chat-send", "修改");
     send.type = "submit"; send.setAttribute("aria-label", "发送");
     form.append(model, input, send);
-    page.append(title, projectRow, projectStatus, messages, form);
+    page.append(title, projectRow, oauthForm, projectStatus, messages, form);
     let controller = null, selectedRepo = "", lastPrompt = "", lastResult = null;
     const repoRefs = new Map();
     const bubble = (role, text, error = false) => {
@@ -282,10 +295,13 @@ magpie.plugin("sessions", (ctx) => {
       const config = await status.json();
       if (!config.configured) {
         auth.hidden = true; project.disabled = true;
+        oauthForm.hidden = false;
         project.replaceChildren(new Option("GitHub 尚未配置", ""));
-        projectStatus.textContent = "管理员需要先配置 GitHub OAuth App，回调地址为 https://gateway.everyapi.ai/_github/callback。";
+        projectStatus.textContent = "先保存 GitHub OAuth App，保存后即可授权并选择项目。";
         return;
       }
+      oauthForm.hidden = true;
+      project.disabled = false;
       const res = await fetch("/api/github/repos", { headers: { Accept: "application/json" } });
       if (res.status === 401) { project.replaceChildren(new Option("请先授权 GitHub", "")); auth.hidden = false; projectStatus.textContent = "请先授权 GitHub，授权后可选择组织内项目。"; return; }
       if (!res.ok) throw new Error(await errorText(res));
@@ -297,6 +313,20 @@ magpie.plugin("sessions", (ctx) => {
       projectStatus.textContent = repos.length ? "选择项目后输入修改要求，EveryAPI 会读取并修改工作区。" : "当前 GitHub 账号没有可访问的项目。";
     };
     loadRepos().catch((err) => { project.replaceChildren(new Option("GitHub 项目加载失败", "")); projectStatus.textContent = err.message; });
+    oauthForm.onsubmit = async (event) => {
+      event.preventDefault();
+      oauthSave.disabled = true;
+      projectStatus.textContent = "正在保存 GitHub OAuth 配置…";
+      try {
+        const res = await fetch("/api/github/config", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ client_id: oauthID.value, client_secret: oauthSecret.value, organization: oauthOrg.value }) });
+        if (!res.ok) throw new Error(await errorText(res));
+        oauthSecret.value = "";
+        projectStatus.textContent = "配置已保存，正在加载 GitHub 项目…";
+        await loadRepos();
+      } catch (err) {
+        projectStatus.textContent = err.message || "GitHub OAuth 配置保存失败";
+      } finally { oauthSave.disabled = false; }
+    };
     project.onchange = async () => {
       selectedRepo = project.value; pr.hidden = true; lastResult = null;
       if (!selectedRepo) return;

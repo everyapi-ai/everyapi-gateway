@@ -6,14 +6,19 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/yetone/magpie/internal/settings"
 )
 
 const (
@@ -30,7 +35,64 @@ type githubAuthConfig struct {
 	Organization string
 }
 
+type githubOAuthStoredConfig struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+	Organization string `json:"organization"`
+}
+
+func githubOAuthConfigPath() string {
+	if root := strings.TrimSpace(os.Getenv("EVERYAPI_DATA_DIR")); root != "" {
+		return filepath.Join(root, "github-oauth.json")
+	}
+	return filepath.Join(settings.Dir(), "github-oauth.json")
+}
+
+func readStoredGitHubConfig() githubOAuthStoredConfig {
+	b, err := os.ReadFile(githubOAuthConfigPath())
+	if err != nil {
+		return githubOAuthStoredConfig{}
+	}
+	var cfg githubOAuthStoredConfig
+	if json.Unmarshal(b, &cfg) != nil {
+		return githubOAuthStoredConfig{}
+	}
+	return cfg
+}
+
+func saveStoredGitHubConfig(cfg githubOAuthStoredConfig) error {
+	dir := filepath.Dir(githubOAuthConfigPath())
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".github-oauth-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return err
+	}
+	encErr := json.NewEncoder(f).Encode(cfg)
+	syncErr := f.Sync()
+	closeErr := f.Close()
+	if err := errors.Join(encErr, syncErr, closeErr); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, githubOAuthConfigPath()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validGitHubConfigValue(v string) bool {
+	return v != "" && !strings.ContainsFunc(v, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) })
+}
+
 func loadWebGitHubConfig() githubAuthConfig {
+	stored := readStoredGitHubConfig()
 	secret := strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_OAUTH_CLIENT_SECRET"))
 	if secret == "" {
 		secret = strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_SECRET"))
@@ -54,14 +116,24 @@ func loadWebGitHubConfig() githubAuthConfig {
 			}
 		}
 	}
+	if secret == "" {
+		secret = strings.TrimSpace(stored.ClientSecret)
+	}
 	clientID := strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_OAUTH_CLIENT_ID"))
 	if clientID == "" {
 		clientID = strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_CLIENT_ID"))
 	}
+	if clientID == "" {
+		clientID = strings.TrimSpace(stored.ClientID)
+	}
+	organization := strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_ORG"))
+	if organization == "" {
+		organization = strings.TrimSpace(stored.Organization)
+	}
 	return githubAuthConfig{
 		ClientID:     clientID,
 		ClientSecret: secret,
-		Organization: strings.TrimSpace(os.Getenv("EVERYAPI_GITHUB_ORG")),
+		Organization: organization,
 	}
 }
 

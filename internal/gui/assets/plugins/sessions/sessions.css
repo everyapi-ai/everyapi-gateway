@@ -7,6 +7,13 @@
 .everyapi-project-select { flex: 1; min-width: 0; height: 38px; border: 1px solid var(--line); border-radius: 9px; padding: 0 9px; background: var(--card); color: var(--fg); font: inherit; }
 .everyapi-project-auth, .everyapi-project-pr { flex: none; min-height: 38px; padding: 0 11px; border-radius: 9px; background: var(--pill); color: var(--fg); text-decoration: none; font: inherit; cursor: pointer; }
 .everyapi-project-pr { background: var(--accent); color: #fff; border: 0; }
+.everyapi-github-config { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; align-items: center; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.everyapi-github-config strong, .everyapi-github-config-hint { grid-column: 1 / -1; }
+.everyapi-github-config strong { font-size: 13px; }
+.everyapi-github-config-hint { color: var(--muted); font-size: 12px; }
+.everyapi-github-config-input { min-width: 0; height: 38px; border: 1px solid var(--line); border-radius: 8px; padding: 0 9px; background: var(--bg); color: var(--fg); font: inherit; }
+.everyapi-github-config-save { height: 38px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+.everyapi-github-config-save:disabled { opacity: .5; }
 .everyapi-project-status { margin: 0; color: var(--muted); font-size: 12px; }
 .everyapi-project-diff { max-height: 240px; overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); color: var(--fg-2); font: 11px/1.45 var(--code-font, monospace); white-space: pre-wrap; }
 .everyapi-chat-messages { flex: 1; min-height: 120px; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg); }
@@ -19,7 +26,7 @@
 .everyapi-chat-input { flex: 1; min-width: 0; min-height: 42px; max-height: 180px; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg); font: 16px/1.45 var(--ui-font, system-ui), sans-serif; padding: 8px 5px; }
 .everyapi-chat-send { flex: none; width: 42px; height: 42px; border-radius: 10px; background: var(--accent); color: #fff; font-size: 18px; }
 .everyapi-chat-send:disabled { opacity: .5; }
-@media (max-width: 560px) { .everyapi-chat-page { height: auto; padding: 12px; } .everyapi-project-row { flex-wrap: wrap; } .everyapi-project-select { flex-basis: 100%; } .everyapi-chat-msg { max-width: 92%; } }
+@media (max-width: 560px) { .everyapi-chat-page { height: auto; padding: 12px; } .everyapi-project-row { flex-wrap: wrap; } .everyapi-project-select { flex-basis: 100%; } .everyapi-github-config { grid-template-columns: 1fr; } .everyapi-github-config strong, .everyapi-github-config-hint { grid-column: auto; } .everyapi-github-config-save { width: 100%; } .everyapi-chat-msg { max-width: 92%; } }
 .sm-head { gap: 8px; height: auto; min-height: 34px; }
 .sm-switch { min-width: 0; flex: 1; display: flex; align-items: center; }
 .sm-agents { min-width: 0; max-width: 100%; }

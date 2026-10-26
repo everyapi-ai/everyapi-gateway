@@ -46,6 +46,14 @@ Set `EVERYAPI_PUBLIC_URL` to the reachable HTTPS origin, for example `https://ga
 
 Offline mode stores only a public, credential-free reconnect page. Management pages, settings, request history, API responses and keys are not put into Cache Storage. Calls and console operations still need the gateway online. The launch URL is `/`, never a key-bearing sign-in link. Only the manifest, icons, worker and reconnect page are readable without a sign-in cookie; management APIs retain authentication.
 
+## GitHub project assistant
+
+Open `https://gateway.everyapi.ai/settings?view=sessions` after signing in to the management console. The EveryAPI project assistant can authorize GitHub, list repositories in the configured organization, clone a selected repository into the gateway's private data volume, ask EveryAPI to inspect and edit files, show the resulting diff and create a Pull Request from a new branch. The model selector is in the composer on phone and desktop; there is no separate `/chat` page.
+
+Create a dedicated GitHub OAuth App with homepage `https://gateway.everyapi.ai` and callback `https://gateway.everyapi.ai/_github/callback`. GitHub's OAuth flow requires the callback sent by the authorization request to match a callback registered on the app; GitHub documents the same requirement for the code exchange ([GitHub OAuth documentation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)). In Sessions, an administrator can enter the Client ID, Client Secret and organization once the app exists. The gateway writes these credentials to `github-oauth.json` in the private data directory with mode `0600`, never returns the secret from its API and keeps users' GitHub access tokens in memory only. The OAuth request asks for `repo`, `read:org` and `user:email`; the account must belong to the configured organization.
+
+The assistant refuses paths that escape the selected workspace and refuses common secret files such as `.env`, `.pem`, `.key`, `secret` and `credential` files. The Pull Request operation commits only the selected workspace's changes, pushes a timestamped `everyapi/*` branch and uses the selected repository's default branch as the PR base.
+
 `MOBILE_PWA=1 node scripts/everyapi-web-smoke.cjs dist/everyapi-web` adds real-worker mobile acceptance to the normal disposable-server smoke. It checks Chinese and English at 320, 375, 390, 430 and 768 pixels wide plus landscape, touch navigation, EveryAPI save/discovery, login expiry with a controlling worker, Cache Storage contents and a real interrupted local connection followed by reconnect. Run it with Chromium and with `BROWSER=webkit`; browser emulation does not establish a successful installation on a physical iPhone.
 
 ## Connect a client
